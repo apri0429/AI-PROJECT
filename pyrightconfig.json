@@ -1,0 +1,12 @@
+{
+  "include": ["vendor-sheet-ai"],
+  "exclude": [
+    "vendor-sheet-ai/frontend/node_modules",
+    "vendor-sheet-ai/frontend/dist",
+    "vendor-sheet-ai/gallery_files",
+    "**/__pycache__"
+  ],
+  "extraPaths": ["vendor-sheet-ai"],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic"
+}

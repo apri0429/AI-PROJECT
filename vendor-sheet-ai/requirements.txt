@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+google-genai
+pymysql
+Pillow
+rembg[cpu]
+pypdf
+PyMuPDF
+python-docx

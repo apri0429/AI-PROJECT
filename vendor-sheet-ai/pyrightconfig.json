@@ -1,0 +1,12 @@
+{
+  "include": ["."],
+  "exclude": [
+    "frontend/node_modules",
+    "frontend/dist",
+    "gallery_files",
+    "**/__pycache__"
+  ],
+  "extraPaths": ["."],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic"
+}

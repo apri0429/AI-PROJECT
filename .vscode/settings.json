@@ -1,0 +1,12 @@
+{
+    "python.defaultInterpreterPath": "C:\\Python313\\python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}\\vendor-sheet-ai",
+        "./vendor-sheet-ai"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}\\vendor-sheet-ai",
+        "./vendor-sheet-ai"
+    ],
+    "python.analysis.pythonVersion": "3.13"
+}

@@ -1,0 +1,22 @@
+# Secrets — never commit these
+.env
+client_secret.json
+token.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Generated/uploaded gallery images (user data, not source)
+gallery_files/
+
+# Editor/OS
+.vscode/
+.DS_Store
+Thumbs.db
