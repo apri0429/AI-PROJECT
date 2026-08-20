@@ -63,6 +63,7 @@ function SidebarNavItem({
   const expanded = hasChildren ? expandedGroups[getGroupKey(item)] ?? false : false
   const isButton = hasChildren || !item.href
   const submenuId = hasChildren ? `${getGroupKey(item)}-submenu` : undefined
+  const isChatHistoryGroup = item.id === 'pinned' || item.id === 'history'
   const className = [
     'nav-item',
     active ? 'active' : '',
@@ -131,21 +132,39 @@ function SidebarNavItem({
       {hasChildren && !collapsed ? (
         <div
           id={submenuId}
-          className={`nav-submenu${expanded ? ' expanded' : ''}`}
+          className={`nav-submenu${expanded ? ' expanded' : ''}${isChatHistoryGroup ? ' nav-submenu--chat-list' : ''}`}
+          data-group-id={item.id}
           aria-hidden={!expanded}
         >
-          {item.children.map((child) => (
-            <SidebarNavItem
-              key={getItemKey(child)}
-              item={child}
-              selectedPath={selectedPath}
-              collapsed={collapsed}
-              onSelect={onSelect}
-              expandedGroups={expandedGroups}
-              onToggleGroup={onToggleGroup}
-              depth={depth + 1}
-            />
-          ))}
+          {isChatHistoryGroup ? (
+            <div className="nav-submenu-scroll">
+              {item.children.map((child) => (
+                <SidebarNavItem
+                  key={getItemKey(child)}
+                  item={child}
+                  selectedPath={selectedPath}
+                  collapsed={collapsed}
+                  onSelect={onSelect}
+                  expandedGroups={expandedGroups}
+                  onToggleGroup={onToggleGroup}
+                  depth={depth + 1}
+                />
+              ))}
+            </div>
+          ) : (
+            item.children.map((child) => (
+              <SidebarNavItem
+                key={getItemKey(child)}
+                item={child}
+                selectedPath={selectedPath}
+                collapsed={collapsed}
+                onSelect={onSelect}
+                expandedGroups={expandedGroups}
+                onToggleGroup={onToggleGroup}
+                depth={depth + 1}
+              />
+            ))
+          )}
         </div>
       ) : null}
     </>

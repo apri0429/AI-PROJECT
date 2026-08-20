@@ -335,11 +335,52 @@
 }
 
 .nav-chat-title {
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nav-chat-title--overflow {
+  mask-image: linear-gradient(90deg, #000 0%, #000 calc(100% - 18px), transparent 100%);
+}
+
+.nav-chat-title-track {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.nav-chat-title--overflow .nav-chat-title-track {
+  max-width: none;
+}
+
+.nav-item:hover .nav-chat-title--overflow .nav-chat-title-track,
+.nav-item:focus-within .nav-chat-title--overflow .nav-chat-title-track,
+.nav-item.active .nav-chat-title--overflow .nav-chat-title-track {
+  animation: nav-chat-title-marquee 3.8s ease-in-out 0.18s infinite alternate;
+}
+
+@keyframes nav-chat-title-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(var(--nav-chat-scroll-distance, 0px) * -1));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item:hover .nav-chat-title--overflow .nav-chat-title-track,
+  .nav-item:focus-within .nav-chat-title--overflow .nav-chat-title-track,
+  .nav-item.active .nav-chat-title--overflow .nav-chat-title-track {
+    animation: none;
+  }
 }
 
 .nav-chat-pin-dot {
@@ -358,13 +399,16 @@
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+  max-width: 0;
+  overflow: hidden;
   opacity: 0;
-  transition: opacity 0.14s ease;
+  transition: max-width 0.16s ease, opacity 0.14s ease;
 }
 
 .nav-item:hover .nav-chat-actions,
 .nav-item:focus-within .nav-chat-actions,
 .nav-chat-actions--open {
+  max-width: 58px;
   opacity: 1;
 }
 
@@ -551,6 +595,39 @@
 .nav-submenu.expanded {
   max-height: 600px;
   padding-bottom: 4px;
+}
+
+.nav-submenu--chat-list.expanded {
+  max-height: 232px;
+  overflow: hidden;
+}
+
+.nav-submenu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 216px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.nav-submenu-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nav-submenu-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 999px;
+}
+
+.nav-submenu-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+}
+
+.nav-submenu-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.34);
 }
 
 #sidebar.sidebar.collapsed .nav-submenu {

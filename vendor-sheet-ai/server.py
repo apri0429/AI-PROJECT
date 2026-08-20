@@ -9,7 +9,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -18,7 +18,9 @@ from pydantic import BaseModel
 from adapters.docs import (
     create_translated_pdf_doc,
     fetch_marketing_picture_bytes,
+    fetch_marketing_picture_candidate_bytes,
     find_product_photo_bytes,
+    list_marketing_picture_candidates,
     generate_description_doc,
     generate_instruction_manual_doc,
     get_description_history_folder_url,
@@ -41,11 +43,13 @@ from adapters.gallery import (
     compose_spec_card,
     compose_usage_card,
     delete_gallery_card as remove_gallery_card_file,
+    delete_variant_photo,
     gallery_root,
     generate_ai_designed_keunggulan_card,
     generate_ai_designed_keypoint_card,
     generate_ai_designed_spec_card,
     generate_ai_designed_usage_card,
+    generate_ai_designed_varian_card,
     generate_background_image,
     generate_keunggulan_content,
     generate_keypoint_icon,
@@ -56,9 +60,11 @@ from adapters.gallery import (
     generate_usage_step_photo,
     refine_gallery_card,
     get_cutout_photo,
+    get_cutout_photo_for_variant,
     hex_to_rgb,
     latest_gallery_card_url,
     list_gallery_cards,
+    list_variant_photos,
     photo_path,
     photo_url_path,
     read_photo_meta,
@@ -66,6 +72,7 @@ from adapters.gallery import (
     save_chat_image,
     save_gallery_card,
     save_source_photo,
+    save_variant_photo,
 )
 from adapters.llm import answer_question, edit_image, generate_image
 from adapters.pdf_translate import SUPPORTED_EXTENSIONS, translate_document_to_indonesian
@@ -863,6 +870,7 @@ def gallery_status(product_name: str) -> dict:
         "has_sheet_photo_link": bool(sheet_picture_url),
         "cards": cards,
         "card_history": history,
+        "variants": list_variant_photos(product_name),
     }
 
 
@@ -881,6 +889,52 @@ def refresh_gallery_photo(product_name: str) -> dict:
     if not _sync_photo_from_sheet(product_name, picture_url):
         raise HTTPException(status_code=502, detail="Gagal mengambil foto dari link sheet")
 
+    return {"ok": True, "photo_url": photo_url_path(product_name), "photo_source": "sheet"}
+
+
+@app.get("/api/gallery/{product_name}/sheet-photo-candidates")
+def gallery_sheet_photo_candidates(product_name: str) -> dict:
+    """List every image the sheet's LINK MARKETING PICTURE link could
+    resolve to — plural when it's a Drive folder with several photos in it,
+    so the frontend can let the user page through and pick one instead of
+    always silently getting whichever file sorts first."""
+    row = _find_product_row_or_none(product_name)
+    picture_url = row.get("marketing_picture_link") if row else None
+    if not picture_url:
+        return {"candidates": []}
+
+    candidates = list_marketing_picture_candidates(picture_url)
+    return {
+        "candidates": [
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "preview_url": f"/api/gallery/{product_name}/sheet-photo-candidates/{c['id']}/preview",
+            }
+            for c in candidates
+        ]
+    }
+
+
+@app.get("/api/gallery/{product_name}/sheet-photo-candidates/{file_id}/preview")
+def gallery_sheet_photo_candidate_preview(product_name: str, file_id: str) -> Response:
+    content = fetch_marketing_picture_candidate_bytes(file_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Gagal memuat gambar")
+    return Response(content=content, media_type="image/png")
+
+
+@app.post("/api/gallery/{product_name}/sheet-photo-candidates/{file_id}/select")
+def gallery_select_sheet_photo_candidate(product_name: str, file_id: str) -> dict:
+    """Save one specific candidate (picked via the endpoints above) as this
+    product's actual photo."""
+    row = _find_product_row_or_none(product_name)
+    picture_url = row.get("marketing_picture_link") if row else None
+    content = fetch_marketing_picture_candidate_bytes(file_id)
+    if not content:
+        raise HTTPException(status_code=502, detail="Gagal mengambil foto")
+
+    save_source_photo(product_name, content, source="sheet", source_url=picture_url)
     return {"ok": True, "photo_url": photo_url_path(product_name), "photo_source": "sheet"}
 
 
@@ -1053,6 +1107,29 @@ async def upload_gallery_photo(product_name: str, file: UploadFile = File(...)) 
     return {"photo_url": photo_url_path(product_name)}
 
 
+@app.post("/api/gallery/{product_name}/variants")
+async def upload_gallery_variant_photo(
+    product_name: str, name: str = Form(...), file: UploadFile = File(...),
+) -> dict:
+    content = await file.read()
+    try:
+        variant = save_variant_photo(product_name, name, content)
+    except Exception as exc:
+        logger.exception("Failed to save uploaded variant photo for %s", product_name)
+        raise HTTPException(status_code=400, detail="Invalid image file") from exc
+
+    return variant
+
+
+@app.delete("/api/gallery/{product_name}/variants/{variant_id}")
+def delete_gallery_variant_photo(product_name: str, variant_id: str) -> dict:
+    try:
+        delete_variant_photo(product_name, variant_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Varian tidak ditemukan")
+    return {"ok": True}
+
+
 @app.post("/api/gallery/{product_name}/generate")
 def generate_gallery_card(
     product_name: str,
@@ -1063,6 +1140,7 @@ def generate_gallery_card(
     usage: bool = True,
     keunggulan: bool = False,
     keunggulan_count: int = 3,
+    varian: bool = False,
     font_theme: str | None = None,
     palette: str = DEFAULT_PALETTE,
     framing: str = DEFAULT_FRAMING,
@@ -1078,10 +1156,10 @@ def generate_gallery_card(
     spec_full_design: bool = True,
     custom_prompt: str | None = None,
 ) -> dict:
-    if not (keypoint or spec or usage or keunggulan):
+    if not (keypoint or spec or usage or keunggulan or varian):
         raise HTTPException(status_code=400, detail="Pilih minimal satu jenis kartu untuk di-generate")
 
-    keunggulan_count = max(1, min(3, keunggulan_count))
+    keunggulan_count = max(1, min(5, keunggulan_count))
 
     if palette not in COLOR_PALETTES:
         palette = DEFAULT_PALETTE
@@ -1113,15 +1191,21 @@ def generate_gallery_card(
 
     row = _find_product_row(product_name)
 
-    source_path = photo_path(product_name)
-    if not source_path.exists():
-        raise HTTPException(
-            status_code=400,
-            detail="No product photo yet — upload one or generate the instruction manual first",
-        )
+    # "varian" cards are built entirely from their own per-variant photos
+    # (see the varian block below), not the shared "Referensi produk" photo
+    # — so only require that shared photo when some other card type that
+    # actually needs it was also requested.
+    needs_main_photo = keypoint or spec or usage or keunggulan
+    if needs_main_photo:
+        source_path = photo_path(product_name)
+        if not source_path.exists():
+            raise HTTPException(
+                status_code=400,
+                detail="No product photo yet — upload one or generate the instruction manual first",
+            )
 
     try:
-        photo = get_cutout_photo(product_name)
+        photo = get_cutout_photo(product_name) if needs_main_photo else None
 
         # If the user typed their own scene (e.g. "di kelas", "di kantor"),
         # that text replaces the AI's own guess at where this product
@@ -1325,9 +1409,9 @@ def generate_gallery_card(
         if keunggulan:
             # Unlike keypoint/spec/usage (one fixed image slot each),
             # "keunggulan" produces however many the user asked for
-            # (1-3) in one generate click — each its own distinct
-            # advantage/headline/photo, not variations of the same card.
-            keunggulan_items = generate_keunggulan_content(row, framing)[:keunggulan_count]
+            # (1-5) in one generate click — each grounded in one "Fitur
+            # Produk" bullet, not variations of the same card.
+            keunggulan_items = generate_keunggulan_content(row, framing, count=keunggulan_count)
             logger.info(
                 "Gallery keunggulan for %s -> %d item(s) %r",
                 product_name, len(keunggulan_items), keunggulan_items,
@@ -1338,11 +1422,69 @@ def generate_gallery_card(
                     photo, product_name, item["headline"], item["emphasis"], item["points"],
                     item_scene, palette=palette, framing=framing,
                     extra_instruction=custom_prompt,
+                    custom_primary=custom_primary, custom_accent=custom_accent,
                 )
                 if keunggulan_card is not None:
                     buffer = io.BytesIO()
                     keunggulan_card.convert("RGB").save(buffer, format="PNG")
                     save_gallery_card(product_name, "keunggulan", buffer.getvalue())
+
+        if varian:
+            # One card per uploaded variant photo (not per variant name) —
+            # each upload is its own accurate reference, never AI-guessed,
+            # so each one becomes its own card, labeled with that photo's
+            # own variant name. Silently produces zero cards if the user
+            # hasn't uploaded any variant photos yet, same as keunggulan
+            # producing zero items when its content generation comes up
+            # empty.
+            variant_photos = list_variant_photos(product_name)
+            logger.info(
+                "Gallery varian for %s -> %d photo(s)", product_name, len(variant_photos),
+            )
+            # list_variant_photos is newest-first, but each save_gallery_card
+            # call below stamps a strictly increasing timestamp — so saving
+            # in that same order would leave the newest VARIANT last in the
+            # loop with the LOWEST timestamp, landing it last (not first) in
+            # the newest-first card history. The frontend pairs its
+            # newest-first variant list against this same card history
+            # positionally, so that reversal silently mismatched every
+            # variant's name against a DIFFERENT variant's generated card.
+            # Iterating oldest-first here fixes that: the newest variant
+            # photo is generated last, so its card gets the highest
+            # timestamp and lands first in history, lining back up with the
+            # frontend's variants[0].
+            variant_failures = []
+            for variant in reversed(variant_photos):
+                variant_cutout = get_cutout_photo_for_variant(product_name, variant["id"])
+                variant_card = generate_ai_designed_varian_card(
+                    variant_cutout, product_name, variant["name"],
+                    palette=palette, framing=framing, extra_instruction=custom_prompt,
+                    custom_primary=custom_primary, custom_accent=custom_accent,
+                    scene_description=custom_scene,
+                )
+                if variant_card is not None:
+                    buffer = io.BytesIO()
+                    variant_card.convert("RGB").save(buffer, format="PNG")
+                    save_gallery_card(product_name, "varian", buffer.getvalue())
+                else:
+                    # generate_ai_designed_varian_card swallows its own AI-call
+                    # exception and returns None (logged, not raised) so one
+                    # bad variant doesn't abort the rest of the batch — but
+                    # that means a total failure here would otherwise look
+                    # like a silent no-op: the endpoint still returns 200 with
+                    # the *previous* card_history untouched, so the UI shows
+                    # "Generate berhasil" while nothing actually changed.
+                    variant_failures.append(variant["name"])
+            if variant_failures and len(variant_failures) == len(variant_photos):
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Gagal generate kartu varian untuk: "
+                        f"{', '.join(variant_failures)}. Cek log server, lalu coba generate ulang."
+                    ),
+                )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to generate gallery card for %s", product_name)
         raise HTTPException(status_code=500, detail="Failed to generate gallery card") from exc

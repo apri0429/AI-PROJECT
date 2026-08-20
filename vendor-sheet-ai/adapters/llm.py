@@ -108,6 +108,8 @@ def generate_json(prompt: str) -> dict:
         contents=prompt,
         config={"response_mime_type": "application/json"},
     )
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty JSON response")
     return json.loads(response.text)
 
 
@@ -124,7 +126,24 @@ def generate_json_from_image(prompt: str, image_bytes: bytes) -> list | dict:
         contents=[part, prompt],
         config={"response_mime_type": "application/json"},
     )
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty JSON response")
     return json.loads(response.text)
+
+
+def _extract_image_bytes(response) -> bytes:
+    """Pull the inline image bytes out of a generate_content image response —
+    shared by every image-generating call below so the "no image part" /
+    "empty image data" guards only need to be gotten right in one place."""
+    candidates = response.candidates or []
+    if not candidates:
+        raise RuntimeError("Gemini image response contained no candidates")
+    content = candidates[0].content
+    for part in (content.parts if content else None) or []:
+        if part.inline_data and part.inline_data.data:
+            return part.inline_data.data
+
+    raise RuntimeError("Gemini image response contained no image data")
 
 
 def generate_image_from_references(prompt: str, images: list[bytes], temperature: float | None = None) -> bytes:
@@ -145,16 +164,16 @@ def generate_image_from_references(prompt: str, images: list[bytes], temperature
         genai_types.Part.from_bytes(data=image_bytes, mime_type="image/png")
         for image_bytes in images
     ]
-    parts.append(prompt)
+    parts.append(genai_types.Part.from_text(text=prompt))
 
     response = _client.models.generate_content(
-        model=settings.gemini_image_model, contents=parts, config=_square_image_config(temperature),
+        # `parts: list[Part]` vs. the SDK's own dynamically-built
+        # PartUnionDict alias (its type varies by whether PIL is
+        # importable, so pyright can't resolve it as a static type here)
+        # — a stub-resolution mismatch only, not a real type error.
+        model=settings.gemini_image_model, contents=parts, config=_square_image_config(temperature),  # type: ignore[reportArgumentType]
     )
-    for part in response.candidates[0].content.parts:
-        if part.inline_data:
-            return part.inline_data.data
-
-    raise RuntimeError("Gemini image response contained no image data")
+    return _extract_image_bytes(response)
 
 
 def generate_image(prompt: str) -> bytes:
@@ -168,11 +187,7 @@ def generate_image(prompt: str) -> bytes:
         contents=prompt,
         config=_square_image_config(),
     )
-    for part in response.candidates[0].content.parts:
-        if part.inline_data:
-            return part.inline_data.data
-
-    raise RuntimeError("Gemini image response contained no image data")
+    return _extract_image_bytes(response)
 
 
 def edit_image(prompt: str, image, aspect_ratio: str = "1:1") -> bytes:
@@ -197,8 +212,4 @@ def edit_image(prompt: str, image, aspect_ratio: str = "1:1") -> bytes:
         contents=[image, prompt],
         config=genai_types.GenerateContentConfig(**kwargs),
     )
-    for part in response.candidates[0].content.parts:
-        if part.inline_data:
-            return part.inline_data.data
-
-    raise RuntimeError("Gemini image response contained no image data")
+    return _extract_image_bytes(response)

@@ -5,8 +5,6 @@ import {
   PushPinRounded as PushPinRoundedIcon,
   PushPinOutlined as PushPinOutlinedIcon,
   EditRounded as EditRoundedIcon,
-  Inventory2Rounded as Inventory2RoundedIcon,
-  UnarchiveRounded as UnarchiveRoundedIcon,
   DeleteRounded as DeleteRoundedIcon,
 } from "@mui/icons-material";
 
@@ -15,14 +13,89 @@ function stop(event) {
   event.stopPropagation();
 }
 
+const TITLE_STOPWORDS = new Set([
+  "aku",
+  "ambil",
+  "apa",
+  "apakah",
+  "arah",
+  "bantu",
+  "bisa",
+  "buat",
+  "buatkan",
+  "coba",
+  "dari",
+  "di",
+  "dong",
+  "ga",
+  "gak",
+  "ini",
+  "itu",
+  "jadi",
+  "jalan",
+  "kak",
+  "kalau",
+  "ke",
+  "lagi",
+  "mau",
+  "pakai",
+  "please",
+  "saya",
+  "si",
+  "the",
+  "this",
+  "tolong",
+  "untuk",
+  "yang",
+]);
+
+function smartCapitalize(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return "New chat";
+  if (/[A-Z]{2,}|\d/.test(trimmed)) return trimmed;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function compactConversationTitle(title) {
+  const raw = String(title || "").trim();
+  if (!raw || raw.toLowerCase() === "new chat") return "New chat";
+
+  const withoutUrls = raw.replace(/https?:\/\/\S+/gi, " ");
+  const quoted = withoutUrls.match(/["“”']([^"“”']{3,})["“”']/);
+  const source = quoted?.[1] || withoutUrls;
+  const normalized = source
+    .replace(/\.(xlsx?|csv|pdf|docx?|png|jpe?g|webp)\b/gi, "")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const words = normalized
+    .split(" ")
+    .map((word) => word.trim())
+    .filter(Boolean);
+
+  const coreWords = words.filter((word) => {
+    const lower = word.toLowerCase();
+    return lower.length > 2 && !TITLE_STOPWORDS.has(lower);
+  });
+
+  const selected = (coreWords.length >= 2 ? coreWords : words).slice(0, 4).join(" ");
+  return smartCapitalize(selected || raw).slice(0, 48);
+}
+
 export default function ConversationNavLabel({ conv, onUpdateConversation, onDeleteConversation }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conv.title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState(null);
+  const [titleOverflow, setTitleOverflow] = useState(false);
+  const [titleScrollDistance, setTitleScrollDistance] = useState(0);
   const rowRef = useRef(null);
+  const titleRef = useRef(null);
+  const titleTrackRef = useRef(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
+  const displayTitle = compactConversationTitle(conv.title);
 
   useEffect(() => {
     if (!isMenuOpen) return undefined;
@@ -72,6 +145,29 @@ export default function ConversationNavLabel({ conv, onUpdateConversation, onDel
     };
   }, [isMenuOpen]);
 
+  useLayoutEffect(() => {
+    const titleNode = titleRef.current;
+    const trackNode = titleTrackRef.current;
+    if (!titleNode || !trackNode) return undefined;
+
+    const updateOverflow = () => {
+      const overflowDistance = Math.max(0, trackNode.scrollWidth - titleNode.clientWidth);
+      const shouldMove = overflowDistance > 4 || displayTitle.length > 12;
+      setTitleOverflow(shouldMove);
+      setTitleScrollDistance(overflowDistance > 4 ? overflowDistance + 12 : 14);
+    };
+
+    updateOverflow();
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(titleNode);
+    observer.observe(trackNode);
+    window.addEventListener("resize", updateOverflow);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateOverflow);
+    };
+  }, [displayTitle, conv.pinned]);
+
   const finishRename = () => {
     const title = draftTitle.trim();
     if (title) {
@@ -120,27 +216,6 @@ export default function ConversationNavLabel({ conv, onUpdateConversation, onDel
 
             <button
               type="button"
-              className="nav-chat-menu__item"
-              role="menuitem"
-              onMouseDown={stop}
-              onClick={(e) => {
-                stop(e);
-                setIsMenuOpen(false);
-                onUpdateConversation(conv.id, { archived: !conv.archived });
-              }}
-            >
-              {conv.archived ? (
-                <UnarchiveRoundedIcon fontSize="small" />
-              ) : (
-                <Inventory2RoundedIcon fontSize="small" />
-              )}
-              <span>{conv.archived ? "Restore chat" : "Archive"}</span>
-            </button>
-
-            <div className="nav-chat-menu__divider" role="separator" />
-
-            <button
-              type="button"
               className="nav-chat-menu__item nav-chat-menu__item--danger"
               role="menuitem"
               onMouseDown={stop}
@@ -159,10 +234,14 @@ export default function ConversationNavLabel({ conv, onUpdateConversation, onDel
       : null;
 
   return (
-    <span className="nav-chat-row" ref={rowRef}>
-      <span className="nav-chat-title">
+    <span className="nav-chat-row" ref={rowRef} title={conv.title}>
+      <span
+        className={"nav-chat-title" + (titleOverflow ? " nav-chat-title--overflow" : "")}
+        ref={titleRef}
+        style={{ "--nav-chat-scroll-distance": `${titleScrollDistance}px` }}
+      >
         {conv.pinned ? <span className="nav-chat-pin-dot" aria-hidden="true" /> : null}
-        {conv.title}
+        <span className="nav-chat-title-track" ref={titleTrackRef}>{displayTitle}</span>
       </span>
       <span className={"nav-chat-actions" + (isMenuOpen ? " nav-chat-actions--open" : "")}>
         <button

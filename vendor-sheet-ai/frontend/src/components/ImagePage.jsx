@@ -12,14 +12,17 @@ import BackgroundMain from "../piagam/template/BackgroundMain.jsx";
 import {
   API_BASE,
   deleteGalleryHistoryItem,
+  deleteGalleryVariantPhoto,
   fetchGalleryHistory,
   fetchGalleryStatus,
   fetchProducts,
+  fetchSheetPhotoCandidates,
   generateGalleryCard,
   refineGalleryCard,
-  refreshGalleryPhotoFromSheet,
   removeGalleryCardFrame,
+  selectSheetPhotoCandidate,
   uploadGalleryPhoto,
+  uploadGalleryVariantPhoto,
 } from "../api";
 
 const FRAMING_OPTIONS = [
@@ -330,15 +333,18 @@ function ProductPicker({ selected, onSelect, framing }) {
   );
 }
 
-function ImageHistory({ onSelectProduct }) {
+function ImageHistory({ onSelectProduct, openGroupName, onOpenGroupChange }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [previewItem, setPreviewItem] = useState(null);
   const [deletingKey, setDeletingKey] = useState(null);
   const [removingFrameKey, setRemovingFrameKey] = useState(null);
-  const [openGroupName, setOpenGroupName] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedHistoryKeys, setSelectedHistoryKeys] = useState(new Set());
   const [search, setSearch] = useState("");
+  const setOpenGroupName = (name) => onOpenGroupChange?.(name);
+  const historyItemKey = (item) => `${item.product_name}::${item.url}`;
   const groupedItems = useMemo(() => {
     const groups = [];
     const indexByProduct = new Map();
@@ -362,27 +368,48 @@ function ImageHistory({ onSelectProduct }) {
     return groupedItems.filter((group) => group.productName.toLowerCase().includes(term));
   }, [groupedItems, search]);
   const openGroup = groupedItems.find((group) => group.productName === openGroupName);
+  const openGroupItems = openGroup?.items || [];
+  const selectedCount = selectedHistoryKeys.size;
+  const allOpenGroupSelected =
+    openGroupItems.length > 0 && openGroupItems.every((item) => selectedHistoryKeys.has(historyItemKey(item)));
 
   const load = () => {
     setLoading(true);
     setError(null);
     fetchGalleryHistory()
-      .then((data) => setItems(data.items || []))
+      .then((data) => {
+        setItems(data.items || []);
+        setSelectedHistoryKeys(new Set());
+        setSelectMode(false);
+      })
       .catch((err) => setError(err.message || "Failed to load image history"))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
 
+  useEffect(() => {
+    const validKeys = new Set(items.map(historyItemKey));
+    setSelectedHistoryKeys((current) => {
+      const next = new Set([...current].filter((key) => validKeys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [items]);
+
   const handleDelete = async (item) => {
     if (!window.confirm("Hapus image ini dari history?")) return;
-    const key = `${item.product_name}-${item.url}`;
+    const key = historyItemKey(item);
     setDeletingKey(key);
     setError(null);
     try {
       await deleteGalleryHistoryItem(item.product_name, item.url);
-      setItems((current) => current.filter((historyItem) => historyItem.url !== item.url));
-      setPreviewItem((current) => (current?.url === item.url ? null : current));
+      setItems((current) => current.filter((historyItem) => historyItemKey(historyItem) !== key));
+      setSelectedHistoryKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      setPreviewItem((current) => (current && historyItemKey(current) === key ? null : current));
     } catch (err) {
       setError(err.message || "Failed to delete image history");
     } finally {
@@ -390,8 +417,62 @@ function ImageHistory({ onSelectProduct }) {
     }
   };
 
+  const handleDeleteMany = async (targetItems, message) => {
+    if (targetItems.length === 0) return;
+    if (!window.confirm(message)) return;
+    const targetKeys = new Set(targetItems.map(historyItemKey));
+    setDeletingKey("__bulk__");
+    setError(null);
+    try {
+      await Promise.all(targetItems.map((item) => deleteGalleryHistoryItem(item.product_name, item.url)));
+      setItems((current) => current.filter((item) => !targetKeys.has(historyItemKey(item))));
+      setSelectedHistoryKeys((current) => {
+        const next = new Set(current);
+        for (const key of targetKeys) next.delete(key);
+        return next;
+      });
+      setPreviewItem((current) => (current && targetKeys.has(historyItemKey(current)) ? null : current));
+      if (targetKeys.size === openGroupItems.length) {
+        setOpenGroupName(null);
+        setSelectMode(false);
+      }
+    } catch (err) {
+      setError(err.message || "Failed to delete image history");
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const toggleSelectItem = (item) => {
+    const key = historyItemKey(item);
+    setSelectedHistoryKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllOpenGroup = () => {
+    setSelectedHistoryKeys((current) => {
+      const next = new Set(current);
+      for (const item of openGroupItems) {
+        const key = historyItemKey(item);
+        if (allOpenGroupSelected) {
+          next.delete(key);
+        } else {
+          next.add(key);
+        }
+      }
+      return next;
+    });
+  };
+
   const handleRemoveFrame = async (item) => {
-    const key = `${item.product_name}-${item.url}`;
+    const key = historyItemKey(item);
     setRemovingFrameKey(key);
     setError(null);
     try {
@@ -415,6 +496,17 @@ function ImageHistory({ onSelectProduct }) {
         <button className="history-refresh-btn" onClick={load} disabled={loading}>
           Refresh
         </button>
+        {items.length > 0 && (
+          <button
+            type="button"
+            className="history-refresh-btn image-history-danger-action"
+            onClick={() => handleDeleteMany(items, `Hapus semua ${items.length} image history?`)}
+            disabled={loading || deletingKey === "__bulk__"}
+          >
+            {deletingKey === "__bulk__" && !openGroup ? <span className="button-spinner" /> : null}
+            <span>Hapus semua history</span>
+          </button>
+        )}
       </div>
 
       {!openGroup && (
@@ -461,48 +553,115 @@ function ImageHistory({ onSelectProduct }) {
       {!loading && !error && filteredGroups.length > 0 && (
         openGroup ? (
           <div className="image-history-folder-view">
-            <button className="gallery-back-btn" onClick={() => setOpenGroupName(null)}>
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
-                <path
-                  d="M15 5 8 12l7 7"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span>Kembali ke folder</span>
-            </button>
             <div className="image-history-folder-header">
               <div className="image-history-group-title">
                 <span>{openGroup.productName}</span>
                 {openGroup.vendorName && <small>{openGroup.vendorName}</small>}
               </div>
-              <span className="image-history-count">{openGroup.items.length} image</span>
+              <div className="image-history-folder-actions">
+                <span className="image-history-count">{openGroup.items.length} image</span>
+                <button
+                  type="button"
+                  className="history-refresh-btn image-history-select-action"
+                  onClick={() => {
+                    setSelectMode((current) => !current);
+                    setSelectedHistoryKeys(new Set());
+                  }}
+                  disabled={deletingKey === "__bulk__"}
+                >
+                  {selectMode ? "Batal pilih" : "Mode pilih"}
+                </button>
+                <button
+                  type="button"
+                  className="history-refresh-btn image-history-danger-action"
+                  onClick={() =>
+                    handleDeleteMany(
+                      openGroup.items,
+                      `Hapus semua ${openGroup.items.length} image untuk produk ini?`
+                    )
+                  }
+                  disabled={deletingKey === "__bulk__"}
+                >
+                  Hapus folder
+                </button>
+              </div>
             </div>
+            {selectMode && (
+              <div className="image-history-selection-bar">
+                <button
+                  type="button"
+                  className="history-refresh-btn image-history-select-action"
+                  onClick={toggleSelectAllOpenGroup}
+                  disabled={deletingKey === "__bulk__"}
+                >
+                  {allOpenGroupSelected ? "Batalkan semua" : "Pilih semua"}
+                </button>
+                <span>{selectedCount} dipilih</span>
+                <button
+                  type="button"
+                  className="history-refresh-btn image-history-danger-action"
+                  onClick={() =>
+                    handleDeleteMany(
+                      openGroup.items.filter((item) => selectedHistoryKeys.has(historyItemKey(item))),
+                      `Hapus ${selectedCount} image yang dipilih?`
+                    )
+                  }
+                  disabled={selectedCount === 0 || deletingKey === "__bulk__"}
+                >
+                  {deletingKey === "__bulk__" ? <span className="button-spinner" /> : null}
+                  <span>Hapus dipilih</span>
+                </button>
+              </div>
+            )}
             <div className="image-history-grid">
-              {openGroup.items.map((item) => (
-                <div key={`${item.product_name}-${item.url}`} className="image-history-card-wrap">
+              {openGroup.items.map((item) => {
+                const key = historyItemKey(item);
+                const selected = selectedHistoryKeys.has(key);
+                return (
+                <div key={key} className={"image-history-card-wrap" + (selected ? " selected" : "")}>
                   <button
                     type="button"
-                    className="image-history-card"
-                    onClick={() => setPreviewItem(item)}
+                    className={"image-history-card" + (selected ? " selected" : "")}
+                    onClick={() => (selectMode ? toggleSelectItem(item) : setPreviewItem(item))}
                     title={item.product_name}
+                    aria-pressed={selectMode ? selected : undefined}
                   >
                     <img src={`${API_BASE}${item.url}`} alt={item.product_name} />
                     <span className="image-history-meta">
                       <span className="image-history-date">{formatDate(item.generated_at)}</span>
                     </span>
                   </button>
+                  {selectMode && (
+                    <button
+                      type="button"
+                      className={"image-history-select-check" + (selected ? " selected" : "")}
+                      onClick={() => toggleSelectItem(item)}
+                      disabled={deletingKey === "__bulk__"}
+                      title={selected ? "Batalkan pilihan" : "Pilih image"}
+                      aria-label={selected ? "Batalkan pilihan" : "Pilih image"}
+                    >
+                      {selected && (
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden="true">
+                          <path
+                            d="M5 12.5 9.5 17 19 7"
+                            stroke="currentColor"
+                            strokeWidth="2.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="image-history-frame-btn"
                     onClick={() => handleRemoveFrame(item)}
-                    disabled={removingFrameKey === `${item.product_name}-${item.url}`}
+                    disabled={selectMode || removingFrameKey === key}
                     title="Hapus frame (pakai AI)"
                     aria-label="Hapus frame (pakai AI)"
                   >
-                    {removingFrameKey === `${item.product_name}-${item.url}` ? (
+                    {removingFrameKey === key ? (
                       <span className="button-spinner" />
                     ) : (
                       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
@@ -520,7 +679,7 @@ function ImageHistory({ onSelectProduct }) {
                     type="button"
                     className="image-history-delete-btn"
                     onClick={() => handleDelete(item)}
-                    disabled={deletingKey === `${item.product_name}-${item.url}`}
+                    disabled={selectMode || deletingKey === key || deletingKey === "__bulk__"}
                     title="Hapus history"
                     aria-label="Hapus history"
                   >
@@ -534,7 +693,8 @@ function ImageHistory({ onSelectProduct }) {
                     </svg>
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -629,16 +789,23 @@ const CARD_TYPE_OPTIONS = [
   { key: "spec", label: "Spesifikasi" },
   { key: "usage", label: "Cara penggunaan" },
   { key: "keunggulan", label: "Fitur Keunggulan" },
+  { key: "varian", label: "Varian Produk" },
 ];
 
+// keunggulan and varian both produce a variable number of cards per
+// generate (not one fixed slot each), so they're excluded from the fixed
+// type->label map and looked up separately where needed.
+const VARIABLE_COUNT_CARD_TYPES = new Set(["keunggulan", "varian"]);
+
 const CARD_TYPE_LABELS = Object.fromEntries(
-  CARD_TYPE_OPTIONS.filter((option) => option.key !== "keunggulan").map((option) => [
+  CARD_TYPE_OPTIONS.filter((option) => !VARIABLE_COUNT_CARD_TYPES.has(option.key)).map((option) => [
     option.key,
     option.label,
   ])
 );
 
 const KEUNGGULAN_LABEL = CARD_TYPE_OPTIONS.find((option) => option.key === "keunggulan").label;
+const VARIAN_LABEL = CARD_TYPE_OPTIONS.find((option) => option.key === "varian").label;
 
 function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpenHistory }) {
   const [status, setStatus] = useState(null);
@@ -646,11 +813,27 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [refreshingPhoto, setRefreshingPhoto] = useState(false);
+  // When the sheet's photo link is a Drive folder with more than one image,
+  // these hold the candidates to page through instead of silently picking
+  // whichever file happens to sort first.
+  const [photoCandidates, setPhotoCandidates] = useState([]);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [selectingCandidate, setSelectingCandidate] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [withModel, setWithModel] = useState(false);
   const [useAiScene, setUseAiScene] = useState(true);
-  const [cardTypes, setCardTypes] = useState({ keypoint: true, spec: true, usage: true, keunggulan: true });
+  const [cardTypes, setCardTypes] = useState({ keypoint: true, spec: true, usage: true, keunggulan: true, varian: false });
   const [keunggulanCount, setKeunggulanCount] = useState(3);
+  // "Varian" card photos — each upload is its own accurate reference (name
+  // typed by the user, never AI-guessed), one generated card per upload.
+  // Picking several files at once (the file input allows multi-select)
+  // stages them here first — one name box per picked file — so selecting
+  // 2 photos in one go visibly asks for 2 names instead of silently only
+  // using the first file or forcing one-at-a-time picks.
+  const [pendingVariants, setPendingVariants] = useState([]);
+  const [variantUploading, setVariantUploading] = useState(false);
+  const [deletingVariantId, setDeletingVariantId] = useState(null);
+  const variantFileInputRef = useRef(null);
   const [palette, setPalette] = useState("navy_yellow");
   const selectedFraming = FRAMING_OPTIONS.find((option) => option.value === framing);
   const [customPrimary, setCustomPrimary] = useState("#1e3a8a");
@@ -678,9 +861,13 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
   // "hapus frame?" confirmation modal; null keeps it hidden.
   const [framePromptTypes, setFramePromptTypes] = useState(null);
   const fileInputRef = useRef(null);
-  const anyCardTypeSelected = cardTypes.keypoint || cardTypes.spec || cardTypes.usage || cardTypes.keunggulan;
+  const anyCardTypeSelected =
+    cardTypes.keypoint || cardTypes.spec || cardTypes.usage || cardTypes.keunggulan || cardTypes.varian;
   const keunggulanHistory = (status?.card_history || []).filter((item) => item.card_type === "keunggulan");
   const keunggulanCards = keunggulanHistory.slice(0, keunggulanCount);
+  const variants = status?.variants || [];
+  const varianHistory = (status?.card_history || []).filter((item) => item.card_type === "varian");
+  const varianCards = varianHistory.slice(0, variants.length);
   const selectedPalette = PALETTE_OPTIONS.find((option) => option.value === palette) || PALETTE_OPTIONS[0];
   const palettePreviewPrimary = selectedPalette.value === "custom" ? customPrimary : selectedPalette.primary;
   const palettePreviewAccent = selectedPalette.value === "custom" ? customAccent : selectedPalette.accent;
@@ -700,7 +887,12 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
       const url = status.cards[type]?.card_url || null;
       return { key: type, label, url, generatedAt: url ? generatedAtByUrl.get(url) : null };
     });
-    if (cardTypes.keunggulan) {
+    // Shown whenever there's either a live "Fitur Keunggulan" toggle or
+    // past keunggulan cards already on file — gating purely on the toggle
+    // would hide already-generated keunggulan cards (e.g. after unchecking
+    // it before a later generate, or reloading with it off) even though
+    // the cards themselves are still there and previewable.
+    if (cardTypes.keunggulan || keunggulanHistory.length > 0) {
       for (let i = 0; i < keunggulanCount; i += 1) {
         const url = keunggulanCards[i]?.url || null;
         list.push({
@@ -711,8 +903,24 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
         });
       }
     }
+    // Shown whenever there's either a live "Varian Produk" toggle or past
+    // varian cards already on file — unlike the other slots, varian starts
+    // OFF by default (it needs setup first), so gating purely on the
+    // toggle would hide already-generated varian cards after a reload
+    // until the user re-checks it, even though the cards are still there.
+    if (cardTypes.varian || varianHistory.length > 0) {
+      for (let i = 0; i < variants.length; i += 1) {
+        const url = varianCards[i]?.url || null;
+        list.push({
+          key: `varian-${i}`,
+          label: variants[i] ? `${VARIAN_LABEL}: ${variants[i].name}` : `${VARIAN_LABEL} ${i + 1}`,
+          url,
+          generatedAt: varianCards[i]?.generated_at || null,
+        });
+      }
+    }
     return list;
-  }, [status, cardTypes.keunggulan, keunggulanCount, keunggulanCards]);
+  }, [status, cardTypes.keunggulan, keunggulanCount, keunggulanCards, keunggulanHistory, cardTypes.varian, variants, varianCards, varianHistory]);
 
   const resultTotalPages = Math.max(1, Math.ceil(allResultCards.length / RESULT_PAGE_SIZE));
   const clampedResultPage = Math.min(resultPage, resultTotalPages - 1);
@@ -721,11 +929,68 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
     clampedResultPage * RESULT_PAGE_SIZE + RESULT_PAGE_SIZE
   );
 
+  // Guards the auto-pull-from-sheet below so it only fires once per
+  // product — otherwise a product whose sheet link doesn't actually
+  // resolve to a usable photo would keep retrying forever.
+  const autoFetchedProductRef = useRef(null);
+
+  // Looks up every candidate image the sheet's photo link resolves to.
+  // Zero -> nothing usable, leave "Belum ada foto". One -> obvious choice,
+  // auto-save it like before. More than one (a Drive folder with several
+  // photos) -> show the picker instead of silently grabbing whichever file
+  // happens to sort first.
+  const resolvePhotoFromSheet = () => {
+    setRefreshingPhoto(true);
+    setPhotoCandidates([]);
+    setCandidateIndex(0);
+    fetchSheetPhotoCandidates(productName)
+      .then((data) => {
+        const candidates = data.candidates || [];
+        if (candidates.length === 0) return;
+        if (candidates.length === 1) {
+          return selectSheetPhotoCandidate(productName, candidates[0].id).then(() =>
+            fetchGalleryStatus(productName).then(setStatus)
+          );
+        }
+        setPhotoCandidates(candidates);
+        setCandidateIndex(0);
+      })
+      .catch((err) => setError(err.message || "Gagal menarik foto dari sheet"))
+      .finally(() => setRefreshingPhoto(false));
+  };
+
+  const handlePickPhotoCandidate = async () => {
+    const candidate = photoCandidates[candidateIndex];
+    if (!candidate) return;
+    setSelectingCandidate(true);
+    setError(null);
+    try {
+      await selectSheetPhotoCandidate(productName, candidate.id);
+      setPhotoCandidates([]);
+      setCandidateIndex(0);
+      const data = await fetchGalleryStatus(productName);
+      setStatus(data);
+    } catch (err) {
+      setError(err.message || "Gagal memilih foto");
+    } finally {
+      setSelectingCandidate(false);
+    }
+  };
+
   const loadStatus = () => {
     setLoadingStatus(true);
     setError(null);
     fetchGalleryStatus(productName)
-      .then(setStatus)
+      .then((data) => {
+        setStatus(data);
+        const shouldAutoPull =
+          !data.photo_url &&
+          data.has_sheet_photo_link &&
+          autoFetchedProductRef.current !== productName;
+        if (!shouldAutoPull) return;
+        autoFetchedProductRef.current = productName;
+        resolvePhotoFromSheet();
+      })
       .catch((err) => setError(err.message || "Failed to load status"))
       .finally(() => setLoadingStatus(false));
   };
@@ -754,16 +1019,82 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
     }
   };
 
-  const handleRefreshPhotoFromSheet = async () => {
-    setRefreshingPhoto(true);
+  const handleRefreshPhotoFromSheet = () => {
     setError(null);
+    autoFetchedProductRef.current = productName;
+    resolvePhotoFromSheet();
+  };
+
+  const handleVariantFilesPicked = (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0) return;
+    // Replaces any still-unconfirmed selection rather than appending —
+    // picking again is treated as "start over with this new selection",
+    // same as how the main photo picker replaces rather than accumulates.
+    setPendingVariants(
+      files.map((file, index) => ({
+        file,
+        name: files.length > 1 ? `Varian ${index + 1}` : "",
+        previewUrl: URL.createObjectURL(file),
+      }))
+    );
+  };
+
+  const updatePendingVariantName = (index, name) => {
+    setPendingVariants((current) => current.map((item, i) => (i === index ? { ...item, name } : item)));
+  };
+
+  const removePendingVariant = (index) => {
+    setPendingVariants((current) => {
+      URL.revokeObjectURL(current[index].previewUrl);
+      return current.filter((_, i) => i !== index);
+    });
+  };
+
+  const cancelPendingVariants = () => {
+    pendingVariants.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    setPendingVariants([]);
+  };
+
+  const handleConfirmVariantUpload = async () => {
+    if (pendingVariants.length === 0) return;
+    setVariantUploading(true);
     try {
-      await refreshGalleryPhotoFromSheet(productName);
+      for (const item of pendingVariants) {
+        // Sequential on purpose, same reasoning as the other batch upload
+        // loops in this file — one product photo update at a time keeps
+        // failures isolated to the one file that actually failed.
+        // An empty name here gets rejected by the backend (FastAPI/
+        // Starlette treats an empty multipart text field as a MISSING
+        // required field, not an empty one) — fall back client-side so
+        // leaving a name box blank still uploads.
+        await uploadGalleryVariantPhoto(productName, item.name.trim() || "Varian", item.file);
+      }
+      pendingVariants.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      setPendingVariants([]);
       loadStatus();
     } catch (err) {
-      setError(err.message || "Gagal menarik foto dari sheet");
+      // Uses a toast, not the plain error banner — this can happen while
+      // "Pengaturan lanjutan" is open, and that modal overlay sits above
+      // the banner (lower z-index), so the banner would silently go
+      // unseen. Toasts render above the modal.
+      setToast({ type: "error", title: "Upload varian gagal", message: err.message || "Gagal upload foto varian" });
     } finally {
-      setRefreshingPhoto(false);
+      setVariantUploading(false);
+    }
+  };
+
+  const handleDeleteVariant = async (variant) => {
+    if (!window.confirm(`Hapus foto varian "${variant.name}"?`)) return;
+    setDeletingVariantId(variant.id);
+    try {
+      await deleteGalleryVariantPhoto(productName, variant.id);
+      loadStatus();
+    } catch (err) {
+      setToast({ type: "error", title: "Hapus varian gagal", message: err.message || "Gagal menghapus foto varian" });
+    } finally {
+      setDeletingVariantId(null);
     }
   };
 
@@ -857,6 +1188,13 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
             // Sequential on purpose — each call is itself a full AI image
             // edit, so firing all of them at once would just queue up the
             // same rate limit/latency behind the scenes.
+            await removeGalleryCardFrame(productName, item.url);
+          }
+        } else if (type === "varian") {
+          const items = (freshStatus.card_history || [])
+            .filter((entry) => entry.card_type === "varian")
+            .slice(0, (freshStatus.variants || []).length);
+          for (const item of items) {
             await removeGalleryCardFrame(productName, item.url);
           }
         } else {
@@ -1007,7 +1345,59 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                       </span>
                     )}
                   </div>
-                  {status.photo_url ? (
+                  {photoCandidates.length > 0 ? (
+                    <div className="gallery-photo-candidate-picker">
+                      <div className="gallery-photo-candidate-frame">
+                        <img
+                          key={photoCandidates[candidateIndex].id}
+                          src={`${API_BASE}${photoCandidates[candidateIndex].preview_url}`}
+                          alt={photoCandidates[candidateIndex].name}
+                        />
+                      </div>
+                      <div className="gallery-photo-candidate-controls">
+                        <IconButton
+                          size="small"
+                          onClick={() => setCandidateIndex((i) => Math.max(0, i - 1))}
+                          disabled={candidateIndex === 0 || selectingCandidate}
+                          aria-label="Foto sebelumnya"
+                          sx={pagerButtonSx}
+                        >
+                          <ChevronLeftRoundedIcon fontSize="small" />
+                        </IconButton>
+                        <span className="gallery-photo-candidate-count">
+                          <strong>{candidateIndex + 1}</strong>
+                          <span className="gallery-results-pager-count-sep">/</span>
+                          <span>{photoCandidates.length}</span>
+                        </span>
+                        <IconButton
+                          size="small"
+                          onClick={() =>
+                            setCandidateIndex((i) => Math.min(photoCandidates.length - 1, i + 1))
+                          }
+                          disabled={candidateIndex === photoCandidates.length - 1 || selectingCandidate}
+                          aria-label="Foto berikutnya"
+                          sx={pagerButtonSx}
+                        >
+                          <ChevronRightRoundedIcon fontSize="small" />
+                        </IconButton>
+                      </div>
+                      <button
+                        type="button"
+                        className="modal-cancel-btn gallery-loading-btn gallery-pick-photo-btn"
+                        onClick={handlePickPhotoCandidate}
+                        disabled={selectingCandidate}
+                      >
+                        {selectingCandidate ? (
+                          <>
+                            <span className="button-spinner" />
+                            <span>...</span>
+                          </>
+                        ) : (
+                          "Pakai foto ini"
+                        )}
+                      </button>
+                    </div>
+                  ) : status.photo_url ? (
                     <button
                       type="button"
                       className="gallery-photo-preview-frame"
@@ -1021,6 +1411,11 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                         alt={productName}
                       />
                     </button>
+                  ) : refreshingPhoto ? (
+                    <div className="gallery-photo-empty gallery-photo-loading">
+                      <span className="button-spinner" />
+                      <span>Menarik foto dari sheet...</span>
+                    </div>
                   ) : (
                     <div className="gallery-photo-empty">
                       Belum ada foto
@@ -1139,7 +1534,7 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                       role="radiogroup"
                       aria-label="Jumlah gambar keunggulan"
                     >
-                      {[1, 2, 3].map((count) => (
+                      {[1, 2, 3, 4, 5].map((count) => (
                         <button
                           key={count}
                           type="button"
@@ -1530,7 +1925,7 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                     target="_blank"
                     rel="noreferrer"
                     className="gallery-history-thumb"
-                    title={`${CARD_TYPE_LABELS[item.card_type] || item.card_type} · ${new Date(item.generated_at).toLocaleString()}`}
+                    title={`${CARD_TYPE_LABELS[item.card_type] || (item.card_type === "keunggulan" ? KEUNGGULAN_LABEL : item.card_type === "varian" ? VARIAN_LABEL : item.card_type)} · ${new Date(item.generated_at).toLocaleString()}`}
                   >
                     <img src={`${API_BASE}${item.url}`} alt={`Riwayat generate ${index + 1}`} />
                   </a>
@@ -1796,6 +2191,149 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                     </div>
                   </div>
                 </div>
+
+                <div className="gallery-option-group gallery-variant-section">
+                  <div className="gallery-section-label">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true">
+                      <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+                      <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+                      <rect x="3.5" y="13" width="7.5" height="7.5" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+                      <rect x="13" y="13" width="7.5" height="7.5" rx="1.7" stroke="currentColor" strokeWidth="1.7" />
+                    </svg>
+                    Varian Produk ({variants.length} foto)
+                  </div>
+                  <p className="im-subtitle">
+                    Upload foto asli tiap varian (warna/ukuran) biar hasilnya akurat — nggak
+                    ditebak AI. Tiap foto yang diupload jadi 1 kartu sendiri, dilabeli sesuai
+                    nama yang diketik. Aktifkan toggle "Varian Produk" di Jenis output biar
+                    ikut di-generate.
+                  </p>
+
+                  {variants.length > 0 && (
+                    <div className="gallery-variant-list">
+                      {variants.map((variant) => (
+                        <div key={variant.id} className="gallery-variant-item">
+                          <img
+                            className="gallery-variant-thumb"
+                            src={`${API_BASE}${variant.url}`}
+                            alt={variant.name}
+                          />
+                          <span className="gallery-variant-name" title={variant.name}>
+                            {variant.name}
+                          </span>
+                          <button
+                            type="button"
+                            className="gallery-variant-delete-btn"
+                            onClick={() => handleDeleteVariant(variant)}
+                            disabled={deletingVariantId === variant.id}
+                            title="Hapus foto varian"
+                            aria-label="Hapus foto varian"
+                          >
+                            {deletingVariantId === variant.id ? (
+                              <span className="button-spinner" />
+                            ) : (
+                              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true">
+                                <path
+                                  d="M3 6h18M8 6V4.5C8 3.67 8.67 3 9.5 3h5c.83 0 1.5.67 1.5 1.5V6m2 0-.7 13.25c-.05.98-.86 1.75-1.84 1.75H8.54c-.98 0-1.79-.77-1.84-1.75L6 6m4 5v6m4-6v6"
+                                  stroke="currentColor"
+                                  strokeWidth="1.7"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <input
+                    ref={variantFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    hidden
+                    onChange={handleVariantFilesPicked}
+                  />
+
+                  {pendingVariants.length > 0 ? (
+                    <div className="gallery-variant-pending">
+                      <p className="im-subtitle">
+                        {pendingVariants.length > 1
+                          ? `${pendingVariants.length} foto dipilih — kasih nama tiap satu, lalu upload sekaligus.`
+                          : "Kasih nama foto ini, lalu upload."}
+                      </p>
+                      <div className="gallery-variant-pending-list">
+                        {pendingVariants.map((item, index) => (
+                          <div key={item.previewUrl} className="gallery-variant-pending-item">
+                            <img className="gallery-variant-thumb" src={item.previewUrl} alt="" />
+                            <input
+                              type="text"
+                              className="gallery-scene-input gallery-variant-name-input"
+                              placeholder={`Nama varian, mis. Varian ${index + 1}`}
+                              value={item.name}
+                              onChange={(event) => updatePendingVariantName(index, event.target.value)}
+                              disabled={variantUploading}
+                              autoFocus={index === 0}
+                            />
+                            <button
+                              type="button"
+                              className="gallery-variant-delete-btn"
+                              onClick={() => removePendingVariant(index)}
+                              disabled={variantUploading}
+                              title="Batalkan foto ini"
+                              aria-label="Batalkan foto ini"
+                            >
+                              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true">
+                                <path
+                                  d="M6.75 6.75 17.25 17.25M17.25 6.75 6.75 17.25"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="gallery-variant-add-row">
+                        <button
+                          type="button"
+                          className="modal-cancel-btn"
+                          onClick={cancelPendingVariants}
+                          disabled={variantUploading}
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="button"
+                          className="modal-cancel-btn gallery-loading-btn gallery-variant-upload-btn"
+                          onClick={handleConfirmVariantUpload}
+                          disabled={variantUploading}
+                        >
+                          {variantUploading ? (
+                            <>
+                              <span className="button-spinner" />
+                              <span>...</span>
+                            </>
+                          ) : (
+                            `Upload ${pendingVariants.length} foto`
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="gallery-variant-add-row">
+                      <button
+                        type="button"
+                        className="modal-cancel-btn gallery-loading-btn gallery-variant-upload-btn"
+                        onClick={() => variantFileInputRef.current?.click()}
+                      >
+                        Pilih foto varian
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="modal-actions">
@@ -1934,6 +2472,7 @@ export default function ImagePage({ onToggleSidebar }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [tab, setTab] = useState("create");
   const [resetKey, setResetKey] = useState(0);
+  const [historyOpenGroupName, setHistoryOpenGroupName] = useState(null);
 
   const handleSelectProduct = (productName) => {
     setSelectedProduct(productName);
@@ -1945,6 +2484,7 @@ export default function ImagePage({ onToggleSidebar }) {
     setSelectedProduct(null);
     setFraming(null);
     setTab("create");
+    setHistoryOpenGroupName(null);
     setResetKey((prev) => prev + 1);
   };
 
@@ -1979,6 +2519,16 @@ export default function ImagePage({ onToggleSidebar }) {
                 </button>
               </div>
               <div className="page-tabs-row-actions">
+                {tab === "history" && historyOpenGroupName && (
+                  <button
+                    type="button"
+                    className="gallery-framing-change-btn image-history-top-back-btn"
+                    onClick={() => setHistoryOpenGroupName(null)}
+                  >
+                    <ChevronLeftRoundedIcon fontSize="inherit" />
+                    <span>Kembali ke folder</span>
+                  </button>
+                )}
                 {tab === "create" && framing && !selectedProduct && (
                   <button
                     type="button"
@@ -2018,7 +2568,12 @@ export default function ImagePage({ onToggleSidebar }) {
               }}
             />
           ) : tab === "history" ? (
-            <ImageHistory key={`history-${resetKey}`} onSelectProduct={handleSelectProduct} />
+            <ImageHistory
+              key={`history-${resetKey}`}
+              onSelectProduct={handleSelectProduct}
+              openGroupName={historyOpenGroupName}
+              onOpenGroupChange={setHistoryOpenGroupName}
+            />
           ) : !framing ? (
             <FramingPicker key={`framing-${resetKey}`} selected={framing} onSelect={setFraming} />
           ) : (

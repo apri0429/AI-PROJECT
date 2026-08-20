@@ -710,7 +710,7 @@ function GenerateTab() {
 
                 {cardTypes.keunggulan && (
                   <div className="brand-choice-options automation-keunggulan-count" role="radiogroup" aria-label="Jumlah gambar keunggulan">
-                    {[1, 2, 3].map((count) => (
+                    {[1, 2, 3, 4, 5].map((count) => (
                       <button
                         key={count}
                         type="button"

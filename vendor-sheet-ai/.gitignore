@@ -15,6 +15,7 @@ frontend/dist/
 
 # Generated/uploaded gallery images (user data, not source)
 gallery_files/
+chat_images/
 
 # Editor/OS
 .vscode/

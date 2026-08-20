@@ -232,6 +232,35 @@ INSTRUCTION_MANUAL_SYSTEM_INSTRUCTION = (
 )
 
 
+FITUR_PRODUK_FIELDS = [f"FITUR_{i}" for i in (1, 2, 3, 4, 5)]
+
+FITUR_PRODUK_SYSTEM_INSTRUCTION = (
+    "You are a packaging operations writer producing the \"Fitur Produk\" (product feature) "
+    "bullet points for a product instruction manual, in Bahasa Indonesia, based on raw "
+    "vendor-sheet data for one product. FITUR_1 through FITUR_5 are individual bullet points, "
+    "and ALL FIVE must be filled — never leave any of them as \"-\" or empty. First use every "
+    "real, distinct feature genuinely supported by the data, in order. If the data supports "
+    "fewer than 5 real features, fill the remaining slots yourself with plausible, generic "
+    "features for this type of product based on its category/function (e.g. ease of use, "
+    "durability, comfort, practical everyday benefits) — reasonable and true-to-category, but "
+    "not a specific certification, capacity, or material that isn't in the data. Each of the 5 "
+    "must be distinct, no repeats. Write each as a short, complete phrase or sentence in plain "
+    "text, no markdown, no asterisks."
+)
+
+
+def build_fitur_produk_prompt(row: dict[str, object]) -> str:
+    visible = {k: v for k, v in row.items() if k not in ("source", "row_index", "detail_link", "marketing_picture_link")}
+    row_block = _format_row_context(visible)
+    fields_list = "\n".join(f'  "{f}": ""' for f in FITUR_PRODUK_FIELDS)
+
+    return (
+        f"{FITUR_PRODUK_SYSTEM_INSTRUCTION}\n\n"
+        f"--- Product data ---\n{row_block}\n--- end of product data ---\n\n"
+        f"Respond with ONLY a JSON object with exactly these keys:\n{{\n{fields_list}\n}}"
+    )
+
+
 DESCRIPTION_FIELDS = [
     "INTRO_PARAGRAPH", "SELLING_POINTS_BLOCK", "SPEC_LINES", "VARIAN_LIST_BLOCK", "FAQ_BLOCK",
 ]
@@ -595,70 +624,75 @@ def build_gallery_usage_prompt(row: dict[str, object], framing: str = "gosave") 
     )
 
 
-GALLERY_KEUNGGULAN_FIELDS = [
-    f"HEADLINE_{i}" for i in (1, 2, 3)
-] + [
-    f"EMPHASIS_{i}" for i in (1, 2, 3)
-] + [
-    f"POINT_{i}_{j}" for i in (1, 2, 3) for j in (1, 2, 3)
-] + [
-    f"SCENE_{i}" for i in (1, 2, 3)
-]
+def gallery_keunggulan_fields(count: int) -> list[str]:
+    return (
+        [f"HEADLINE_{i}" for i in range(1, count + 1)]
+        + [f"EMPHASIS_{i}" for i in range(1, count + 1)]
+        + [f"POINT_{i}_{j}" for i in range(1, count + 1) for j in (1, 2, 3)]
+        + [f"SCENE_{i}" for i in range(1, count + 1)]
+    )
+
 
 GALLERY_KEUNGGULAN_SYSTEM_INSTRUCTION = (
-    "You are writing copy for a set of up to 3 \"Fitur Keunggulan\" (product advantage "
-    "highlight) posters, in Bahasa Indonesia, based on the same vendor data used for this "
-    "product's instruction manual. Each of the 3 slots (suffix _1, _2, _3) is ONE self-"
-    "contained poster built around ONE overall headline advantage, backed up by exactly 3 "
-    "supporting points (like a mini keypoint list under that headline). Look across the "
-    "ENTIRE row for real, distinct selling points (material, durability, comfort, safety "
-    "feature, certification, capacity, design detail, ease of use, anything else genuinely "
-    "present) — the headline of each slot should be its own clear theme (e.g. slot 1 about "
-    "grip/traction, slot 2 about comfort, slot 3 about durability), and that slot's 3 points "
-    "should all support and elaborate on that same theme from different angles, not repeat "
-    "each other. Across the 3 slots, headlines must be clearly different themes, no repeats "
-    "or near-duplicates. Only invent a plausible, generic, true-to-category advantage (never "
-    "a specific certification, capacity, or material not in the data) for slots/points the "
-    "data genuinely doesn't support after a real effort to ground them in real data.\n\n"
-    "HEADLINE_n is a punchy, confident headline for that slot's theme, 4-8 words, written "
-    "like real ad copy (e.g. \"Sol Luar yang Kokoh dan Tidak Licin\") — never a generic "
-    "label. EMPHASIS_n is the exact short phrase (2-4 words) copied verbatim from within "
-    "HEADLINE_n that should be visually highlighted in the brand accent color (usually the "
-    "last, most punchy part of the headline, e.g. \"Tidak Licin\") — it must be an exact "
+    "You are writing copy for a set of \"Fitur Keunggulan\" (product advantage highlight) "
+    "posters, in Bahasa Indonesia. You are given a numbered list of \"Fitur Produk\" (product "
+    "feature) bullets — the SAME feature list used in this product's instruction manual. Each "
+    "poster slot n corresponds POSITIONALLY to Fitur Produk item n in that list: turn that "
+    "one feature into ONE self-contained poster with a headline and exactly 3 supporting "
+    "points, all elaborating on that SAME feature from different angles (never introduce a "
+    "different feature or theme than the one assigned to that slot, and never repeat the same "
+    "point 3 times reworded).\n\n"
+    "HEADLINE_n is a punchy, confident headline built from Fitur Produk item n, 4-8 words, "
+    "written like real ad copy (e.g. \"Sol Luar yang Kokoh dan Tidak Licin\") — never a "
+    "generic label. EMPHASIS_n is the exact short phrase (2-4 words) copied verbatim from "
+    "within HEADLINE_n that should be visually highlighted in the brand accent color (usually "
+    "the last, most punchy part of the headline, e.g. \"Tidak Licin\") — it must be an exact "
     "substring of HEADLINE_n, character for character. "
-    "POINT_n_1, POINT_n_2, POINT_n_3 are the 3 supporting points for slot n's headline/theme "
-    "— each a short, complete phrase or sentence, 4-8 words (e.g. \"Sol luar yang kokoh dan "
-    "tidak licin\", \"Aman digunakan di berbagai medan\", \"Tahan air dan mudah "
-    "dibersihkan\"), each a genuinely distinct fact/benefit that supports the headline's "
-    "theme, never 3 rewordings of the same point. "
-    "SCENE_n is a short English image-generation prompt (15-30 words) describing a dramatic "
-    "close-up angle emphasizing specifically the part/aspect of the product that best "
-    "represents slot n's overall theme, while the complete product still stays fully visible "
-    "in frame, never cropped off (e.g. for a grip/traction theme: \"low dramatic angle on the "
-    "boot's textured rubber sole gripping wet pavement, water droplets, whole boot visible\") "
+    "POINT_n_1, POINT_n_2, POINT_n_3 are the 3 supporting points for slot n — each a short, "
+    "complete phrase or sentence, 4-8 words (e.g. \"Sol luar yang kokoh dan tidak licin\", "
+    "\"Aman digunakan di berbagai medan\", \"Tahan air dan mudah dibersihkan\"), each a "
+    "genuinely distinct fact/benefit that supports Fitur Produk item n's feature, never 3 "
+    "rewordings of the same point. "
+    "SCENE_n is a short English image-generation prompt (15-30 words) describing a dramatic, "
+    "tightly-zoomed macro close-up on specifically the part/aspect of the product that best "
+    "represents Fitur Produk item n — like a premium ad, not a full product catalog shot. It's "
+    "fine and encouraged for the rest of the product to extend past the edge of the frame so "
+    "the featured detail fills most of the image (e.g. for a grip/traction feature: \"extreme "
+    "low-angle macro shot on the boot's textured rubber sole gripping wet pavement, water "
+    "droplets, sole fills most of frame, rest of the boot extending upward past the top "
+    "edge\") "
     "— describe the framing, action, and lighting only, never mention the product's "
     "brand name or any text/logo, since the real product photo is composited in separately. "
-    "Each SCENE_n must clearly match its own slot's theme, not a generic full-product shot "
-    "repeated across all 3.\n\n"
+    "Each SCENE_n must clearly match its own slot's feature, not a generic full-product shot "
+    "repeated across slots.\n\n"
     "Write in plain text, no markdown, no asterisks, no trailing punctuation."
 )
 
 
-def build_gallery_keunggulan_prompt(row: dict[str, object], framing: str = "gosave") -> str:
+def build_gallery_keunggulan_prompt(
+    row: dict[str, object], fitur_list: list[str], framing: str = "gosave",
+) -> str:
+    """fitur_list is the "Fitur Produk" bullets (same content the instruction
+    manual uses) — one poster slot is built per entry, in order, so the
+    keunggulan gallery cards stay grounded in the same features rather than
+    being re-derived independently from the raw sheet row."""
+    count = len(fitur_list)
     visible = {k: v for k, v in row.items() if k not in ("source", "row_index", "detail_link", "marketing_picture_link")}
     row_block = _format_row_context(visible)
-    fields_list = "\n".join(f'  "{f}": ""' for f in GALLERY_KEUNGGULAN_FIELDS)
+    fitur_block = "\n".join(f"{i}. {text}" for i, text in enumerate(fitur_list, start=1))
+    fields_list = "\n".join(f'  "{f}": ""' for f in gallery_keunggulan_fields(count))
     hint = brand_style_hint(framing)
     brand_line = (
-        f"\n\nWhen writing SCENE_1 through SCENE_3, let this brand's visual mood guide the "
-        f"framing and energy you describe: {hint}"
+        f"\n\nWhen writing the SCENE fields, let this brand's visual mood guide the framing "
+        f"and energy you describe: {hint}"
         if hint
         else ""
     )
 
     return (
         f"{GALLERY_KEUNGGULAN_SYSTEM_INSTRUCTION}{brand_line}\n\n"
-        f"--- Product data ---\n{row_block}\n--- end of product data ---\n\n"
+        f"--- Fitur Produk ---\n{fitur_block}\n--- end of Fitur Produk ---\n\n"
+        f"--- Product data (for extra context only) ---\n{row_block}\n--- end of product data ---\n\n"
         f"Respond with ONLY a JSON object with exactly these keys:\n{{\n{fields_list}\n}}"
     )
 

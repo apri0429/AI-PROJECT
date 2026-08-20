@@ -21,7 +21,6 @@ const EMPTY_STATE_PROMPTS = [
 
 export default function ChatArea({
   activeConversation,
-  sidebarOpen,
   onToggleSidebar,
   messages,
   isProcessing,

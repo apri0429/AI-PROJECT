@@ -358,7 +358,7 @@ export default function App() {
         onUpdateConversation: handleUpdateConversation,
         onDeleteConversation: handleDeleteConversation,
       }),
-    [conversations, archivedConversations],
+    [conversations, archivedConversations, handleUpdateConversation, handleDeleteConversation],
   );
 
   const closeOverlays = () => {
@@ -450,7 +450,6 @@ export default function App() {
       ) : (
         <ChatArea
           activeConversation={activeConversation}
-          sidebarOpen={sidebarOpen}
           onToggleSidebar={() => setMobileSidebarOpen((prev) => !prev)}
           messages={messages}
           isProcessing={isProcessing || isLoadingConversation}

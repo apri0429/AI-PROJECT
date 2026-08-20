@@ -2827,9 +2827,9 @@
    width it now has (same width:100% + row layout already used for this
    element inside the gallery workspace, see
    .gallery-panel-content-workspace .automation-keunggulan-count above). */
-@media (max-width: 1200px) {
+@media (max-width: 1320px) {
   /* .automation-inline-group-row sits "Proses otomasi" and "Jenis gambar"
-     side by side (each squeezed to ~half the screen width via flex:1/1.4
+     side by side (each squeezed to ~half the screen width via flex/1.4
      with min-width:0) — that's what was still cramming everything into
      narrow columns and clipping "Fitur Keunggulan" at its right edge.
      Measured this directly: at 700/742/780/900/941/1000/1041-1140px
@@ -2838,10 +2838,15 @@
      unrelated breakpoints in this file (860px sidebar collapse, 941px
      layout switch, etc.) shift this column's available width in a
      non-monotonic way, so there's no single narrow "mobile" cutoff to
-     target precisely. Using 1200px (comfortably past the last clipped
-     width we found, 1140px) stacks the two groups full-width across that
-     whole unstable range instead of trying to thread a moving needle —
-     stacking earlier than strictly necessary is harmless, staying
+     target precisely. Originally used 1200px (comfortably past the last
+     clipped width found, 1140px) — the count picker went from 3 slots
+     (1/2/3 foto) to 5 (1-5 foto), which widens .automation-keunggulan-count
+     (still width: max-content, still refuses to shrink) by roughly two
+     more buttons' worth, so the same clipping can now reach further past
+     that old 1140px mark. Bumped to 1320px to keep an equivalent safety
+     margin for the wider row, stacking the two groups full-width across
+     that whole unstable range instead of trying to thread a moving needle
+     — stacking earlier than strictly necessary is harmless, staying
      side-by-side while clipped is not. */
   .automation-inline-group-row {
     flex-direction: column;
@@ -2869,7 +2874,7 @@
     width: 100%;
     grid-auto-flow: row;
     grid-auto-columns: unset;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   /* Once everything above stacks into one column, the "Fitur Keunggulan"
@@ -3520,6 +3525,119 @@
 .gallery-scene-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.gallery-variant-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  max-height: 172px;
+  overflow-y: auto;
+}
+
+.gallery-variant-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 68px;
+}
+
+.gallery-variant-thumb {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-soft);
+  object-fit: cover;
+}
+
+.gallery-variant-name {
+  max-width: 68px;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: var(--text-dim);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-variant-delete-btn {
+  position: absolute;
+  top: -5px;
+  right: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-elevated, #ffffff);
+  color: var(--text-dim);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14);
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.gallery-variant-delete-btn:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.gallery-variant-delete-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.gallery-variant-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.gallery-variant-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gallery-variant-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.gallery-variant-pending-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gallery-variant-pending-item .gallery-variant-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+}
+
+.gallery-variant-pending-item .gallery-variant-delete-btn {
+  position: static;
+  flex: 0 0 auto;
+}
+
+.gallery-variant-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gallery-variant-upload-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .gallery-control-panel {
@@ -5449,6 +5567,7 @@
   color: var(--text-faint);
   font-size: 12px;
   padding: 10px;
+  gap: 8px;
 }
 
 .gallery-actions {
@@ -6531,8 +6650,33 @@
   min-height: 340px;
 }
 
+.image-history-panel .history-toolbar {
+  align-items: center;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--bg-soft);
+}
+
+.image-history-panel .history-refresh-btn {
+  min-height: 36px;
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-elevated));
+  color: var(--accent-strong);
+  font-weight: 750;
+}
+
 .image-history-subtitle {
+  flex: 1 1 260px;
   margin: 0;
+}
+
+.image-history-top-back-btn {
+  border-color: rgba(42, 157, 143, 0.28);
+  background: linear-gradient(135deg, rgba(42, 157, 143, 0.14), rgba(31, 122, 111, 0.12));
+  color: var(--pg-teal-dark);
 }
 
 .image-history-search-box {
@@ -6631,10 +6775,69 @@
 
 .image-history-folder-header {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--bg-soft);
+}
+
+.image-history-folder-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.image-history-select-action {
+  margin-left: 0;
+  min-width: 0;
+  border-color: rgba(71, 85, 105, 0.16);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+}
+
+.image-history-select-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.image-history-danger-action {
+  margin-left: 0;
+  min-width: 0;
+  border-color: rgba(220, 38, 38, 0.28);
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.image-history-danger-action:hover:not(:disabled) {
+  border-color: rgba(185, 28, 28, 0.46);
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.image-history-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 48px;
+  margin: -2px 0 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-soft));
+}
+
+.image-history-selection-bar span {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .image-history-group {
@@ -6718,6 +6921,11 @@
   transform: translateY(-1px);
 }
 
+.image-history-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 .image-history-card img {
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -6739,6 +6947,35 @@
 .image-history-date {
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.image-history-select-check {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.32);
+  transition: background-color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+.image-history-select-check.selected {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: var(--accent);
+}
+
+.image-history-select-check:hover:not(:disabled),
+.image-history-select-check:focus-visible {
+  transform: translateY(-1px);
 }
 
 .image-history-delete-btn {
@@ -7860,6 +8097,13 @@
 
 .gallery-advanced-modal-box {
   width: min(720px, calc(100vw - 32px));
+  /* .image-preview-box (the shared modal shell) already caps this at
+     max-height: 92vh but never scrolls its own overflow — fine for the
+     other modals using that shell, which are short and fixed-height, but
+     the Varian Produk section below has a photo list that can grow past
+     that cap. Let the modal itself scroll instead of spilling content
+     past its rounded bottom edge. */
+  overflow-y: auto;
 }
 
 .gallery-advanced-modal-box .product-checkbox.checked {
@@ -12518,9 +12762,13 @@
   color: var(--pg-navy-2, #2d4a8c);
 }
 
-/* Jenis output checklist — more breathing room between items. */
+/* Jenis output checklist — some breathing room between items, but not so
+   much that a 5th item (Varian Produk) pushes the "Tampilan & tema" panel
+   below it past the visible area — this used to be 24px, tuned back when
+   there were only 4 items; at 5 items that gap alone added ~96px, enough
+   to push the panel below the fold on common laptop-height screens. */
 .gallery-panel-content-workspace .gallery-card-type-options {
-  row-gap: 24px;
+  row-gap: 8px;
   column-gap: 14px;
 }
 
@@ -12691,7 +12939,7 @@
   width: 100%;
   grid-auto-flow: row;
   grid-auto-columns: unset;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .gallery-panel-content-workspace .automation-keunggulan-count .brand-choice-option {
@@ -13031,3 +13279,322 @@
   cursor: pointer;
 }
 
+
+/* Sheet photo candidate picker — shown in place of "Belum ada foto" when
+   the sheet's marketing picture link is a Drive folder with more than one
+   image, so the user can page through and pick the right one instead of
+   silently getting whichever file sorts first. */
+.gallery-photo-candidate-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  flex: 1;
+}
+
+.gallery-photo-candidate-frame {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: clamp(56px, 5vw, 78px);
+  max-height: clamp(90px, 8vw, 120px);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-photo-candidate-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.gallery-photo-candidate-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.gallery-photo-candidate-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 34px;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.gallery-photo-candidate-count strong {
+  color: var(--accent-strong);
+  font-size: 12.5px;
+  font-weight: 800;
+}
+
+.gallery-pick-photo-btn {
+  width: 100%;
+  border-color: rgba(31, 122, 111, 0.48) !important;
+  background: #d1fae5 !important;
+  color: #1f7a6f !important;
+}
+
+.gallery-pick-photo-btn:hover:not(:disabled) {
+  border-color: rgba(31, 122, 111, 0.7) !important;
+  background: #a7f3d0 !important;
+}
+
+/* ChatGPT-like chat surface polish. Kept at the end so it overrides older
+   chat styles without touching the specialized product/document cards. */
+.chat-area {
+  background: #ffffff;
+}
+
+.chat-scroll {
+  padding: 24px clamp(16px, 4vw, 48px) 150px;
+}
+
+.chat-scroll-empty {
+  padding-bottom: 160px;
+}
+
+.message {
+  width: min(100%, 900px);
+  padding: 14px 0;
+  gap: 13px;
+}
+
+.message .avatar {
+  width: 28px;
+  height: 28px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.message-user {
+  justify-content: flex-end;
+}
+
+.message-user .message-body {
+  max-width: min(78%, 680px);
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: #2563eb !important;
+  color: #ffffff;
+  box-shadow: none !important;
+}
+
+.message-user .msg-text {
+  color: #ffffff;
+  font-weight: 500;
+  font-size: 15.5px;
+}
+
+.message-assistant .message-body {
+  max-width: 760px;
+  padding: 12px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  backdrop-filter: none;
+}
+
+.message-assistant .msg-text {
+  color: #111827;
+  font-size: 15.5px;
+  line-height: 1.72;
+}
+
+.copy-message-btn {
+  margin-top: 10px;
+  background: transparent;
+  border-color: transparent;
+}
+
+.copy-message-btn.visible {
+  opacity: 0.76;
+}
+
+.edit-message-btn {
+  background: transparent;
+  color: #6b7280;
+}
+
+.composer {
+  padding: 12px clamp(16px, 4vw, 48px) 22px;
+  background: linear-gradient(to top, #ffffff 70%, rgba(255, 255, 255, 0));
+}
+
+.composer-box {
+  width: min(100%, 900px);
+  min-height: 58px;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 9px 9px 9px 14px;
+  border-color: #d9d9e3;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 10px 34px rgba(15, 23, 42, 0.09);
+}
+
+.composer-box:focus-within {
+  border-color: #c7c7d1;
+  box-shadow: 0 12px 38px rgba(15, 23, 42, 0.12);
+  transform: none;
+}
+
+.composer-link-input {
+  min-height: 38px;
+  max-height: 150px;
+  resize: none;
+  overflow-y: auto;
+  align-self: center;
+  padding: 8px 2px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
+textarea.composer-link-input {
+  align-self: stretch;
+}
+
+.attach-btn,
+.composer-attach-image-btn,
+.send-btn {
+  border-radius: 999px;
+}
+
+.attach-btn,
+.composer-attach-image-btn {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  color: #6b7280;
+}
+
+.attach-btn:hover,
+.composer-attach-image-btn:hover,
+.link-toggle-btn:hover {
+  background: #f4f4f4;
+  color: #111827;
+}
+
+.link-toggle-btn {
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: #e5e7eb;
+  background: transparent;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.send-btn {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  background: #111827;
+  box-shadow: none;
+}
+
+.send-btn:not(:disabled):hover {
+  background: #000000;
+  box-shadow: none;
+}
+
+.composer-hint {
+  width: min(100%, 900px);
+  margin-top: 7px;
+  color: #9ca3af;
+}
+
+.ichat-composer-attachments {
+  width: min(100%, 900px);
+  margin: 0 auto 8px;
+  padding: 0 10px;
+}
+
+.ichat-composer-attachment {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+}
+
+.image-gen-message {
+  width: 100%;
+}
+
+.ichat-attachment-strip {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ichat-attachment-thumb {
+  width: 72px;
+  height: 72px;
+  border-color: rgba(17, 24, 39, 0.1);
+  border-radius: 14px;
+}
+
+.message-assistant .ichat-image-grid {
+  width: min(100%, 640px);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.ichat-image-card {
+  border-color: #e5e7eb;
+  border-radius: 18px;
+  background: #f9fafb;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ichat-image-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+}
+
+.ichat-generating {
+  width: fit-content;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f4f4f4;
+  color: #4b5563;
+}
+
+@media (max-width: 720px) {
+  .chat-scroll {
+    padding-inline: 14px;
+    padding-bottom: 150px;
+  }
+
+  .message {
+    width: 100%;
+  }
+
+  .message-user .message-body {
+    max-width: 86%;
+  }
+
+  .message-assistant .message-body {
+    max-width: calc(100% - 40px);
+  }
+
+  .link-toggle-btn {
+    display: none;
+  }
+}

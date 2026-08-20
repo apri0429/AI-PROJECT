@@ -242,6 +242,38 @@ export async function uploadGalleryPhoto(productName, file) {
   return res.json();
 }
 
+export async function uploadGalleryVariantPhoto(productName, name, file) {
+  const form = new FormData();
+  form.append("name", name);
+  form.append("file", file);
+
+  const res = await fetch(`${API_BASE}/api/gallery/${encodeURIComponent(productName)}/variants`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to upload variant photo");
+  }
+
+  return res.json();
+}
+
+export async function deleteGalleryVariantPhoto(productName, variantId) {
+  const res = await fetch(
+    `${API_BASE}/api/gallery/${encodeURIComponent(productName)}/variants/${encodeURIComponent(variantId)}`,
+    { method: "DELETE" }
+  );
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to delete variant photo");
+  }
+
+  return res.json();
+}
+
 export async function refreshGalleryPhotoFromSheet(productName) {
   const res = await fetch(
     `${API_BASE}/api/gallery/${encodeURIComponent(productName)}/refresh-photo`,
@@ -251,6 +283,35 @@ export async function refreshGalleryPhotoFromSheet(productName) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || "Failed to refresh photo from sheet");
+  }
+
+  return res.json();
+}
+
+export async function fetchSheetPhotoCandidates(productName) {
+  const res = await fetch(
+    `${API_BASE}/api/gallery/${encodeURIComponent(productName)}/sheet-photo-candidates`
+  );
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to load sheet photo candidates");
+  }
+
+  return res.json();
+}
+
+export async function selectSheetPhotoCandidate(productName, fileId) {
+  const res = await fetch(
+    `${API_BASE}/api/gallery/${encodeURIComponent(productName)}/sheet-photo-candidates/${encodeURIComponent(
+      fileId
+    )}/select`,
+    { method: "POST" }
+  );
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || "Failed to select photo");
   }
 
   return res.json();
@@ -266,6 +327,7 @@ export async function generateGalleryCard(
     usage = true,
     keunggulan = false,
     keunggulanCount = 3,
+    varian = false,
     palette = "navy_yellow",
     framing = "gosave",
     customScene = "",
@@ -289,6 +351,7 @@ export async function generateGalleryCard(
     usage,
     keunggulan,
     keunggulan_count: keunggulanCount,
+    varian,
     palette,
     framing,
     spec_manual: specManual,

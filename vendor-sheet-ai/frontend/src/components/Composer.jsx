@@ -172,9 +172,8 @@ export default function Composer({
           }
         }}
       >
-        <input
+        <textarea
           className="composer-link-input"
-          type="text"
           placeholder={
             isProcessing
               ? "Processing..."
@@ -184,8 +183,14 @@ export default function Composer({
           }
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submitQuestion()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submitQuestion();
+            }
+          }}
           disabled={isProcessing}
+          rows={1}
         />
 
         <input

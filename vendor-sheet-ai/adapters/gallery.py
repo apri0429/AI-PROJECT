@@ -20,10 +20,12 @@ from config import settings
 from core.prompts import (
     FONT_THEME_OPTIONS,
     brand_style_hint,
+    build_fitur_produk_prompt,
     build_gallery_keunggulan_prompt,
     build_gallery_keypoints_prompt,
     build_gallery_spec_prompt,
     build_gallery_usage_prompt,
+    FITUR_PRODUK_FIELDS,
 )
 
 try:
@@ -177,13 +179,13 @@ def _theme_colors(
 # artwork instead of a hand-drawn approximation. Falls back to a vector-drawn
 # icon (below) for any keypoint that doesn't match one of these.
 _ICONS_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
-_icon_image_cache: dict[str, Image.Image] = {}
 
 
 def _load_icon_image(name: str) -> Image.Image:
-    if name not in _icon_image_cache:
-        _icon_image_cache[name] = Image.open(_ICONS_DIR / f"{name}.png").convert("RGBA")
-    return _icon_image_cache[name]
+    # Read fresh from disk every call, no in-memory cache — so swapping an
+    # icon file on disk is picked up on the very next generate, with no
+    # stale copy left sitting in memory from before the swap.
+    return Image.open(_ICONS_DIR / f"{name}.png").convert("RGBA")
 
 
 # Ready-made border + logo badge overlays (frontend/public/assets/Framing *.png),
@@ -199,7 +201,6 @@ FRAMING_FILES: dict[str, str] = {
 }
 DEFAULT_FRAMING = "gosave"
 FRAMING_OPTIONS = tuple(FRAMING_FILES.keys())
-_framing_image_cache: dict[str, Image.Image] = {}
 
 # What kind of brand each framing actually is, and which real-world brands'
 # ad campaigns its full-AI-design card prompts should be benchmarked
@@ -234,13 +235,14 @@ def _style_benchmark(framing: str) -> str:
 
 
 def _load_framing_image(framing: str = DEFAULT_FRAMING) -> Image.Image:
+    # Read fresh from disk every call, no in-memory cache — so swapping a
+    # framing/badge asset on disk is picked up on the very next generate,
+    # with no stale copy left sitting in memory from before the swap.
     filename = FRAMING_FILES.get(framing, FRAMING_FILES[DEFAULT_FRAMING])
-    if filename not in _framing_image_cache:
-        loaded = Image.open(_ASSETS_DIR / filename).convert("RGBA")
-        if loaded.size != CARD_SIZE:
-            loaded = loaded.resize(CARD_SIZE, Image.LANCZOS)
-        _framing_image_cache[filename] = loaded
-    return _framing_image_cache[filename]
+    loaded = Image.open(_ASSETS_DIR / filename).convert("RGBA")
+    if loaded.size != CARD_SIZE:
+        loaded = loaded.resize(CARD_SIZE, Image.LANCZOS)
+    return loaded
 
 
 # Real finished example cards the brand actually approved (assets/) — handed
@@ -264,27 +266,25 @@ _STYLE_REFERENCE_FILES: dict[str, str] = {
     "usage": "cara pengunaan baru.png",
     "spec": "spesifikasi baru.png",
     "keunggulan": "fitur unggulan.png",
+    "varian": "varian baru.png",
 }
-_style_reference_cache: dict[str, bytes | None] = {}
-
-
 def _style_reference_filename(card_type: str, framing: str) -> str | None:
     by_framing = _STYLE_REFERENCE_FILES_BY_FRAMING.get(card_type, {})
     return by_framing.get(framing) or _STYLE_REFERENCE_FILES.get(card_type)
 
 
 def _load_style_reference_bytes(card_type: str, framing: str = DEFAULT_FRAMING) -> bytes | None:
-    cache_key = f"{card_type}:{framing}"
-    if cache_key not in _style_reference_cache:
-        filename = _style_reference_filename(card_type, framing)
-        path = _ASSETS_DIR / filename if filename else None
-        if path is not None and path.exists():
-            buffer = io.BytesIO()
-            Image.open(path).convert("RGB").save(buffer, format="PNG")
-            _style_reference_cache[cache_key] = buffer.getvalue()
-        else:
-            _style_reference_cache[cache_key] = None
-    return _style_reference_cache[cache_key]
+    # Read fresh from disk every call, no in-memory cache — so swapping a
+    # reference image on disk (e.g. assets/varian baru.png) feeds straight
+    # into the very next generate, with no stale copy left in memory and
+    # no server restart needed.
+    filename = _style_reference_filename(card_type, framing)
+    path = _ASSETS_DIR / filename if filename else None
+    if path is None or not path.exists():
+        return None
+    buffer = io.BytesIO()
+    Image.open(path).convert("RGB").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _style_reference_instruction(card_type: str, framing: str = DEFAULT_FRAMING) -> str:
@@ -310,7 +310,15 @@ def _style_reference_instruction(card_type: str, framing: str = DEFAULT_FRAMING)
         "different brand than the one being generated now, and a real, correct brand "
         "frame/logo for THIS brand is composited on top separately afterward. Leave the "
         "outer edges of your generated image plain/open exactly as instructed in the safe-"
-        "zone section below, not styled to look like the reference's own border. Critically, "
+        "zone section below, not styled to look like the reference's own border. IMPORTANT: "
+        "this reference image was captured/exported WITHOUT any border frame ever being "
+        "composited on top of it afterward, so its own headline text and product may sit "
+        "much closer to its own edges — even flush against the top or bottom edge — than is "
+        "safe for what you are generating now. Do NOT copy that tight, edge-hugging "
+        "placement; it would get cropped or hidden once the real frame is pasted on top of "
+        "your output. Follow the safe-interior margins given in the safe-zone section below "
+        "exactly, even where they leave visibly more empty space around the text/product "
+        "than this reference shows. Critically, "
         "the reference image belongs to a specific example brand — never render that "
         "brand's own name, wordmark, tagline, or logo text anywhere in your output, whether "
         "as the badge in the corner, printed on the product, or in any other text — the "
@@ -344,9 +352,6 @@ def _generate_designed_card_image(
     )
 
 
-_framing_safe_insets_cache: dict[str, dict[str, int]] = {}
-
-
 def _framing_safe_insets(framing: str) -> dict[str, int]:
     """How many pixels of margin the selected framing's own border/logo
     badge actually occupies on each edge of the card, measured straight off
@@ -354,10 +359,9 @@ def _framing_safe_insets(framing: str) -> dict[str, int]:
     badge is a different size, so text needs a different safe zone per
     framing choice. Used to keep AI-added text (and the layout math around
     it) from landing under the frame, which is pasted on top afterward and
-    would otherwise cover it."""
-    if framing in _framing_safe_insets_cache:
-        return _framing_safe_insets_cache[framing]
-
+    would otherwise cover it. Recomputed from the framing image fresh on
+    every call, no in-memory cache — so swapping a framing asset on disk
+    takes effect on the very next generate."""
     alpha = np.array(_load_framing_image(framing).getchannel("A")) > 10
     h, w = alpha.shape
     row_cov = alpha.mean(axis=1)
@@ -389,15 +393,13 @@ def _framing_safe_insets(framing: str) -> dict[str, int]:
     top_right = _extent(alpha[:, w // 2 :].mean(axis=1))
 
     padding = 24
-    insets = {
+    return {
         "top": top + padding,
         "top_right": top_right + padding,
         "bottom": bottom + padding,
         "left": left + padding,
         "right": right + padding,
     }
-    _framing_safe_insets_cache[framing] = insets
-    return insets
 
 
 _DEFAULT_FONT_THEME = "modern_clean"
@@ -752,6 +754,95 @@ def save_source_photo(
     return path
 
 
+def _variants_dir(product_name: str) -> Path:
+    variants_dir = _safe_product_dir(product_name) / "variants"
+    variants_dir.mkdir(parents=True, exist_ok=True)
+    return variants_dir
+
+
+def _variant_photo_path(product_name: str, variant_id: str) -> Path:
+    if Path(variant_id).name != variant_id:
+        raise FileNotFoundError(variant_id)
+    return _variants_dir(product_name) / f"{variant_id}.png"
+
+
+def _variant_meta_path(product_name: str, variant_id: str) -> Path:
+    if Path(variant_id).name != variant_id:
+        raise FileNotFoundError(variant_id)
+    return _variants_dir(product_name) / f"{variant_id}.meta.json"
+
+
+def save_variant_photo(product_name: str, name: str, image_bytes: bytes) -> dict[str, str]:
+    """Save one user-uploaded "Varian" reference photo, labeled with the
+    variant name the user typed themselves (e.g. "Merah") — unlike every
+    other card type, this content is never AI-guessed, since the whole
+    point is showing the real, accurate look of each variant. Each upload
+    is its own independent entry (not grouped under a shared variant
+    record), so uploading several photos under the same name is exactly
+    how a caller asks for several distinct "Varian" cards out of one
+    generate click, same padding-free 1:1 idea as save_gallery_card's
+    timestamped files."""
+    variant_id = str(int(time.time() * 1000))
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    image.save(_variant_photo_path(product_name, variant_id), format="PNG")
+    name = name.strip() or "Varian"
+    _variant_meta_path(product_name, variant_id).write_text(
+        json.dumps({"name": name}), encoding="utf-8",
+    )
+    safe_name = _safe_product_dir(product_name).name
+    return {
+        "id": variant_id,
+        "name": name,
+        "url": f"/gallery-assets/{safe_name}/variants/{variant_id}.png",
+    }
+
+
+def list_variant_photos(product_name: str) -> list[dict[str, str]]:
+    """All saved "Varian" reference photos, newest first."""
+    safe_name = _safe_product_dir(product_name).name
+    files = sorted(_variants_dir(product_name).glob("*.png"), key=lambda p: p.name, reverse=True)
+    items = []
+    for f in files:
+        variant_id = f.stem
+        meta_path = _variant_meta_path(product_name, variant_id)
+        name = "Varian"
+        if meta_path.exists():
+            try:
+                name = json.loads(meta_path.read_text(encoding="utf-8")).get("name") or "Varian"
+            except (OSError, ValueError):
+                pass
+        items.append({
+            "id": variant_id,
+            "name": name,
+            "url": f"/gallery-assets/{safe_name}/variants/{f.name}",
+        })
+    return items
+
+
+def delete_variant_photo(product_name: str, variant_id: str) -> None:
+    photo_path_ = _variant_photo_path(product_name, variant_id)
+    if not photo_path_.exists():
+        raise FileNotFoundError(variant_id)
+    photo_path_.unlink()
+    meta_path = _variant_meta_path(product_name, variant_id)
+    if meta_path.exists():
+        meta_path.unlink()
+
+
+def get_cutout_photo_for_variant(product_name: str, variant_id: str) -> Image.Image:
+    """Background-removed version of one "Varian" reference photo — same
+    freshly-recomputed-every-call idea as get_cutout_photo, and for the
+    same reason: never let a one-off bad background-removal result stick
+    around on disk waiting to be reused by a later generate."""
+    path = _variant_photo_path(product_name, variant_id)
+    source = Image.open(path).convert("RGBA")
+    try:
+        return remove_background(source)
+    except Exception:
+        logger.exception("Background removal failed for variant %s of %s, using original photo", variant_id, product_name)
+        return source
+
+
 def _keep_largest_blob(cutout: Image.Image) -> Image.Image:
     """If the source photo was actually a multi-shot marketplace collage
     (several product angles, a zoomed inset circle, tiny variant thumbnails)
@@ -957,22 +1048,69 @@ _GENERIC_KEUNGGULAN_FALLBACKS: list[dict[str, Any]] = [
         "scene": "dramatic close-up of the product in an active industrial/commercial use "
                  "scenario, cinematic lighting",
     },
+    {
+        "headline": "Praktis Digunakan Kapan Saja",
+        "emphasis": "Praktis Digunakan",
+        "points": [
+            "Mudah dipakai tanpa perlu ribet",
+            "Cocok dibawa untuk berbagai aktivitas",
+            "Menghemat waktu dan tenaga penggunanya",
+        ],
+        "scene": "close-up shot of hands easily operating/using the product, bright clean "
+                 "lighting, everyday practical context",
+    },
+    {
+        "headline": "Tampilan Menarik dan Fungsional",
+        "emphasis": "Menarik dan Fungsional",
+        "points": [
+            "Desain yang enak dipandang",
+            "Tetap mengutamakan fungsi dan kegunaan",
+            "Cocok dipakai di berbagai suasana",
+        ],
+        "scene": "close-up shot highlighting the product's overall design details, soft "
+                 "studio lighting, clean background",
+    },
 ]
 
 
-def generate_keunggulan_content(row: dict[str, Any], framing: str = DEFAULT_FRAMING) -> list[dict[str, Any]]:
-    """Up to 3 distinct "Fitur Keunggulan" posters — each its own self-
-    contained headline theme (plus the exact phrase within it to accent-
-    color) backed by exactly 3 short supporting points and a close-up scene
-    hint, one AI call covering all 3 slots at once. Padded with generic,
-    true-to-any-product fallbacks (never a specific unearned claim) so a
-    caller asking for 3 images always gets 3 genuinely distinct-looking
-    posters, same padding policy as generate_keypoints."""
-    prompt = build_gallery_keunggulan_prompt(row, framing)
+def generate_keunggulan_content(
+    row: dict[str, Any], framing: str = DEFAULT_FRAMING, count: int = 3,
+) -> list[dict[str, Any]]:
+    """count (1-5) distinct "Fitur Keunggulan" posters, each grounded in one
+    "Fitur Produk" bullet — the same feature list used in this product's
+    instruction manual — so the gallery posters and the instruction manual
+    stay consistent instead of being independently re-derived from the raw
+    sheet row. Each poster is its own self-contained headline theme (plus
+    the exact phrase within it to accent-color) backed by exactly 3 short
+    supporting points and a close-up scene hint, one AI call covering all
+    slots at once. Padded with generic, true-to-any-product fallbacks (never
+    a specific unearned claim) so a caller asking for N images always gets N
+    genuinely distinct-looking posters, same padding policy as
+    generate_keypoints."""
+    count = max(1, min(5, count))
+
+    fitur_prompt = build_fitur_produk_prompt(row)
+    fitur_generated = generate_json(fitur_prompt)
+    fitur_list = [
+        str(fitur_generated.get(field) or "").strip() for field in FITUR_PRODUK_FIELDS
+    ]
+    fitur_list = [f for f in fitur_list if f]
+    # The instruction-manual-style prompt is written to always fill all 5,
+    # but fall back to the generic fallbacks' headlines as feature stand-ins
+    # if the AI call came back short, so there's always enough to ground
+    # `count` slots on.
+    for fallback in _GENERIC_KEUNGGULAN_FALLBACKS:
+        if len(fitur_list) >= count:
+            break
+        if fallback["headline"] not in fitur_list:
+            fitur_list.append(fallback["headline"])
+    fitur_list = fitur_list[:count]
+
+    prompt = build_gallery_keunggulan_prompt(row, fitur_list, framing)
     generated = generate_json(prompt)
     items: list[dict[str, Any]] = []
     seen_headlines: set[str] = set()
-    for i in (1, 2, 3):
+    for i in range(1, count + 1):
         headline = str(generated.get(f"HEADLINE_{i}") or "").strip()
         seen_points: set[str] = set()
         points = []
@@ -998,12 +1136,12 @@ def generate_keunggulan_content(row: dict[str, Any], framing: str = DEFAULT_FRAM
             "scene": str(generated.get(f"SCENE_{i}") or "").strip(),
         })
     for fallback in _GENERIC_KEUNGGULAN_FALLBACKS:
-        if len(items) >= 3:
+        if len(items) >= count:
             break
         if fallback["headline"].casefold() not in seen_headlines:
             seen_headlines.add(fallback["headline"].casefold())
             items.append(fallback)
-    return items[:3]
+    return items[:count]
 
 
 def generate_spec_data(row: dict[str, Any], detail_text: str | None = None) -> dict[str, str]:
@@ -1368,12 +1506,71 @@ def generate_product_scene(
 # How much of the top-left corner the real logo badge (pasted on top after
 # generation) actually occupies, plus margin — the AI must keep this
 # rectangle empty so its own headline/artwork never ends up hidden or
-# clashing underneath the real logo.
+# clashing underneath the real logo. Deliberately generous (real badges
+# measure noticeably smaller, see _framing_badge_extent_pct below) since
+# being oversized here only costs the AI some placement freedom, with zero
+# visual downside — unlike the deterministic patch panel below, this never
+# actually gets painted onto the card.
 _DEAD_ZONE_WIDTH_PCT = 0.55
 _DEAD_ZONE_HEIGHT_PCT = 0.18
 
 
-def _patch_dead_zone(card: Image.Image, panel_color: tuple[int, int, int] = NAVY) -> None:
+def _framing_badge_extent_pct(framing: str) -> tuple[float, float]:
+    """How much of the top-left corner the framing's real logo badge shape
+    actually covers (as a fraction of the card's width/height), measured
+    off its real alpha pixels, same approach as _framing_safe_insets —
+    used to size the deterministic dead-zone patch tightly to the real
+    badge instead of the oversized fixed guess above. A flat-color patch
+    noticeably bigger than the real badge shows up as its own visible
+    smudge/box artifact wherever the badge doesn't actually cover it,
+    especially against a brighter background. Recomputed from the framing
+    image fresh on every call, no in-memory cache — so swapping a framing
+    asset on disk takes effect on the very next generate.
+
+    A higher alpha cutoff than _framing_safe_insets uses on purpose: this
+    frame art has a faint, near-transparent drop-shadow line running the
+    FULL width right under the top border (alpha ~10-40, invisible to the
+    eye but very much > 10). That's harmless for the border-thickness
+    measurement above, but here it would masquerade as "badge" content
+    all the way to the half-width scan limit — a low bar like >10 alone
+    made every single brand's badge measure as fully half the card wide,
+    which isn't real. Genuine badge/border fill is solidly opaque
+    (alpha > 200), so >80 cleanly separates real shape from shadow haze."""
+    alpha = np.array(_load_framing_image(framing).getchannel("A")) > 80
+    h, w = alpha.shape
+    row_cov = alpha.mean(axis=1)
+
+    def _extent(coverage: np.ndarray, threshold: float) -> int:
+        limit = len(coverage) // 2
+        last = 0
+        for i in range(limit):
+            if coverage[i] > threshold:
+                last = i
+        return last
+
+    badge_h = _extent(row_cov, 0.06)
+    # Column coverage measured only within the badge's own rows, not the
+    # whole card height — otherwise the card's thin left border, which
+    # runs the full height, would make the badge look full-height wide.
+    # A higher threshold than the height pass: a bare 6% would still catch
+    # the thin top border strip itself (present in every row of this crop,
+    # so it forms its own low but non-zero baseline all the way across),
+    # not just genuine badge columns.
+    badge_rows = alpha[: badge_h + 1, :] if badge_h > 0 else alpha[:1, :]
+    col_cov = badge_rows.mean(axis=0)
+    badge_w = _extent(col_cov, 0.3)
+
+    # +6 percentage points cushion on top of the real measured shape so the
+    # patch fully covers the badge's own soft shadow/anti-aliased edge,
+    # without being so oversized it shows as a smudge box beyond it.
+    width_pct = min(0.7, badge_w / w + 0.06)
+    height_pct = min(0.35, badge_h / h + 0.06)
+    return (width_pct, height_pct)
+
+
+def _patch_dead_zone(
+    card: Image.Image, panel_color: tuple[int, int, int] = NAVY, framing: str = DEFAULT_FRAMING,
+) -> None:
     """Cover the top-left corner reserved for the real logo badge (composited
     on top right after this runs) with a solid, deliberate color panel
     instead of trying to disguise whatever the AI scene model drew there.
@@ -1391,8 +1588,9 @@ def _patch_dead_zone(card: Image.Image, panel_color: tuple[int, int, int] = NAVY
     artifact-free on every single generation, and reads as an intentional
     brand color-block behind the logo rather than an accident."""
     w, h = card.size
-    zone_w = round(w * _DEAD_ZONE_WIDTH_PCT)
-    zone_h = round(h * _DEAD_ZONE_HEIGHT_PCT)
+    width_pct, height_pct = _framing_badge_extent_pct(framing)
+    zone_w = round(w * width_pct)
+    zone_h = round(h * height_pct)
     if zone_w <= 0 or zone_h <= 0:
         return
 
@@ -1427,12 +1625,16 @@ def _frame_safe_zone_instruction(framing: str) -> str:
     on top afterward."""
     safe = _framing_safe_insets(framing)
     w, h = CARD_SIZE
-    # +3 extra percentage points of cushion on top of the frame's own real
+    # +6 extra percentage points of cushion on top of the frame's own real
     # measured border, on every edge — the model's own placement has some
     # imprecision, and the raw measured border alone leaves zero room for
     # that; a product rendered exactly at the literal edge still risks
-    # landing a few pixels under the frame once it's pasted on top.
-    buffer_pct = 3
+    # landing a few pixels under the frame once it's pasted on top. Bumped
+    # up from 3 after varian cards kept landing text/product right at the
+    # edge of the safe zone — the model treats the margin as a target to
+    # hug rather than a hard limit, so a bigger cushion is needed to keep
+    # the actual result clear of the frame in practice.
+    buffer_pct = 6
     top_pct = round(safe["top"] / h * 100) + buffer_pct
     bottom_pct = round(safe["bottom"] / h * 100) + buffer_pct
     left_pct = round(safe["left"] / w * 100) + buffer_pct
@@ -1471,6 +1673,30 @@ def _default_scene_hint(prefix: str = "Background environment") -> str:
         f"match this exact product's real category and everyday use — the way a professional "
         f"art director would pick a location for this specific product's shoot, never a "
         f"generic, random, or mismatched backdrop."
+    )
+
+
+def _background_mood_instruction(framing: str) -> str:
+    """Whether a card's photographic background should default to a dark,
+    dramatic mood or a bright, clean one — driven by the brand's own
+    character (see BRAND_STYLE_HINTS), never a hardcoded blanket choice.
+    GOTO is deliberately cute/playful/bright (see brand_style_hint); every
+    other current brand leans fierce/dramatic safety-gear energy. A
+    hardcoded "dark, moody" background instruction directly fights GOTO's
+    own brand-mood hint elsewhere in the same prompt, producing a card
+    that reads as generically dark/serious instead of matching that
+    brand's actual look."""
+    if framing == "goto":
+        return (
+            "A bright, clean, warm environment matching that real-world use and this "
+            "brand's playful, friendly character (see the brand mood described above) — "
+            "soft, even, cheerful daylight, tones the white/bright headline text stays "
+            "highly legible against."
+        )
+    return (
+        "A dark, moody, dramatically lit environment matching that real-world use and "
+        "this brand's character (see the brand mood described above) — deep, softly "
+        "blurred tones so the white/bright headline text stays highly legible."
     )
 
 
@@ -1696,7 +1922,8 @@ def generate_ai_designed_keypoint_card(
         f"cleanly under it; a light-colored placeholder shape shows through as a visible "
         f"mismatched edge around the logo.\n\n"
         f"Center:\n"
-        f"The exact product shown in the attached reference image is the main hero, framed "
+        f"The exact product shown in the FIRST attached image (the real product photo) is "
+        f"the main hero, framed "
         f"the way a real marketplace/e-commerce listing photo (Shopee, Tokopedia, Amazon) "
         f"frames its main product shot: large and unmistakably the focal point, comfortably "
         f"filling roughly half to two-thirds of the frame's height — never so large it "
@@ -1706,13 +1933,21 @@ def generate_ai_designed_keypoint_card(
         f"(standing upright, neatly laid down, or hung straight from its own strap/hook), "
         f"level and upright, not tilted or floating at a random awkward angle, with the "
         f"complete product visible, never cropped or cut off by the frame edge. Ultra "
-        f"realistic product photography. Preserve its exact real shape/colors/materials/"
-        f"logo, with every part and component of it fully present exactly as in the "
-        f"reference image — do not redesign, alter, or leave out any part of it. The "
+        f"realistic product photography. Must match the FIRST attached image (the real "
+        f"product photo) exactly — same shape, same colors, same materials/textures, same "
+        f"logo and every printed label/text on it, same proportions between its parts — "
+        f"with every single part and component fully present, including every small attached "
+        f"part (straps, laces, cords, buckles, zippers, stitching, hanging tags, or any other "
+        f"small accessory attached to the product) — none of these may be omitted, "
+        f"shortened, simplified, merged together, or redesigned even slightly just because "
+        f"they're small. The "
         f"product must appear completely by itself: no person, hand, model, toy, or any "
         f"other object next to, holding, or wearing it — only the product alone. Natural "
         f"realistic shadow. Soft reflection on wet/glossy floor if applicable. Cinematic "
-        f"lighting. Extremely detailed texture. Sharp focus on the product, background in "
+        f"lighting. Hyper-detailed, high-resolution texture — every stitch, seam, grain, and "
+        f"surface detail crisp and clearly visible, never smoothed-over, plastic-looking, or "
+        f"low-detail. Razor-sharp, perfectly in-focus product, absolutely no blur, softness, "
+        f"or motion blur on it — background in "
         f"a gentle shallow depth of field.{scene_hint}\n\n"
         f"Background:\n"
         f"Professional environment matching the description above, but always kept clean, "
@@ -1807,7 +2042,7 @@ def generate_ai_designed_keypoint_card(
         # to land on that exact pixel resolution.
         if card.size != CARD_SIZE:
             card = _fit_on_blurred_canvas(card, CARD_SIZE)
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
         card.alpha_composite(_load_framing_image(framing))
         return card
     except Exception:
@@ -1819,6 +2054,7 @@ def generate_ai_designed_keunggulan_card(
     cutout_photo: Image.Image, product_name: str, headline: str, emphasis: str, points: list[str],
     scene_description: str, palette: str = DEFAULT_PALETTE, framing: str = DEFAULT_FRAMING,
     extra_instruction: str = "",
+    custom_primary: str | None = None, custom_accent: str | None = None,
 ) -> Image.Image | None:
     """One "Fitur Keunggulan" poster — a bold headline (its key phrase in the
     accent color) over a dramatic close-up hero shot, with exactly 3 glowing
@@ -1826,21 +2062,22 @@ def generate_ai_designed_keunggulan_card(
     image, styled off assets/fitur unggulan.png (the brand-approved
     reference: headline top-left, 3 icon rows below it on the left, product
     close-up filling the right side). Callers generate one of these per
-    selected theme (1-3 per batch, see generate_keunggulan_content), each
+    selected theme (1-5 per batch, see generate_keunggulan_content), each
     with its own headline/points/scene so a multi-image batch reads as
     distinct highlights, not repeated copies of the same card. This card
     type is always AI-full-design — there's no deterministic PIL-compose
     fallback, same proofread-before-publish trade-off as the other
     full-design cards."""
-    theme = _theme_colors(palette, True)
+    theme = _theme_colors(palette, True, custom_primary, custom_accent)
     primary_hex = "#%02x%02x%02x" % theme["primary"]
     accent_hex = "#%02x%02x%02x" % theme["accent"]
     hint = brand_style_hint(framing)
     brand_line = f" {hint}" if hint else ""
     scene_hint = (
         f" {scene_description}." if scene_description else
-        " A dramatic close-up angle on the part of the product that best shows this overall "
-        "theme, while still keeping the complete product visible within the frame."
+        " A dramatic, tightly-zoomed macro close-up on the part of the product that best "
+        "shows this overall theme, with the rest of the product extending past the frame "
+        "edge rather than being shrunk down to fit fully inside it."
     )
     safe_zone_line = _frame_safe_zone_instruction(framing)
     style_ref_line = _style_reference_instruction("keunggulan", framing)
@@ -1871,22 +2108,35 @@ def generate_ai_designed_keunggulan_card(
         f"or blank rectangle there either, even as a placeholder or empty design element. A "
         f"real brand logo badge graphic gets composited there afterward at those exact pixels.\n\n"
         f"Hero (right side of frame):\n"
-        f"The exact product shown in the attached reference image, as a large, dramatic hero "
-        f"shot filling most of the right side of the frame, proving this overall theme — bold "
-        f"and prominent like a premium ad, but the COMPLETE product must always stay fully "
-        f"visible within the frame, never cropped, cut off, or bled past any edge; scale it "
-        f"down as needed and leave a small clean margin around it rather than letting any part "
-        f"run off the frame boundary. Preserve its exact real shape/colors/materials/logo, "
-        f"with every part and component fully present exactly as in the reference image — "
-        f"do not redesign or leave out any part of it. The product must appear completely "
+        f"The exact product shown in the FIRST attached image (the real product photo), as a "
+        f"large, dramatic, tightly-zoomed macro hero shot filling most of the right side of "
+        f"the frame — like the SECOND attached image's example, which crops in tight on one "
+        f"detail of ITS OWN product rather than showing the whole thing small and centered "
+        f"(copy that cropping/zoom STYLE only, never that example's actual product). Zoom in "
+        f"aggressively on the specific part/detail of the FIRST image's product that proves "
+        f"this overall theme; it is fine, expected, and encouraged for the rest of the "
+        f"product to extend past the top/side/bottom edge of the frame, exactly like the "
+        f"second image's example does — do NOT shrink the product down to keep the whole "
+        f"thing inside the frame, that reads as flat and generic instead of a premium "
+        f"dramatic ad shot. Only the featured detail/part itself must stay fully visible and "
+        f"in sharp focus. Every part that IS shown must be pixel-accurate to the FIRST "
+        f"attached image — exact real shape, color, material, texture, logo, and proportions "
+        f"— including any small attached part visible in that crop (straps, laces, cords, "
+        f"buckles, zippers, stitching, hanging tags, or any other small accessory), rendered "
+        f"in full, never omitted or simplified just because it's small, with zero "
+        f"redesigning, zero substituting a similar-looking product, and zero "
+        f"blending in any detail from the second (style-only) reference image. The product "
+        f"must appear completely "
         f"by itself: no person, hand, model, toy, or any other object next to, holding, or "
         f"wearing it — only the product alone. Ultra realistic product photography, "
-        f"extremely detailed texture, sharp focus, cinematic lighting, natural shadow, soft "
+        f"hyper-detailed high-resolution texture — every stitch, seam, grain, and surface "
+        f"detail crisp and clearly visible, never smoothed-over or low-detail — razor-sharp, "
+        f"perfectly in-focus, absolutely no blur or softness on it, cinematic lighting, "
+        f"natural shadow, soft "
         f"reflection on a wet/glossy surface if applicable.{scene_hint}\n\n"
         f"Background:\n"
         f"The rest of the frame (mostly the left side, behind the headline and point rows) is "
-        f"a dark, moody, softly blurred professional environment matching the product's real-"
-        f"world use — deep charcoal/near-black tones so the white text stays highly legible. "
+        f"{_background_mood_instruction(framing)} "
         f"Keep it clean, simple, and uncluttered above everything else: minimal visual noise, "
         f"no chaotic jumble of shapes/objects. Shallow depth of field, luxury commercial "
         f"photography.\n\n"
@@ -1970,11 +2220,216 @@ def generate_ai_designed_keunggulan_card(
         card = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
         if card.size != CARD_SIZE:
             card = _fit_on_blurred_canvas(card, CARD_SIZE)
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
         card.alpha_composite(_load_framing_image(framing))
         return card
     except Exception:
         logger.exception("AI keunggulan card generation failed for %s", product_name)
+        return None
+
+
+def generate_ai_designed_varian_card(
+    cutout_photo: Image.Image, product_name: str, variant_name: str,
+    palette: str = DEFAULT_PALETTE, framing: str = DEFAULT_FRAMING,
+    extra_instruction: str = "",
+    custom_primary: str | None = None, custom_accent: str | None = None,
+    scene_description: str | None = None,
+) -> Image.Image | None:
+    """One "Varian" poster for a single user-uploaded variant reference
+    photo — a clean hero shot of THAT variant's real photo (the exact
+    color/size/material it actually is, never guessed or invented) with a
+    simple text label naming the variant. Unlike every other card type
+    here, there is no AI-written copy to generate (no tagline, no
+    keypoints, no scene) — the whole point, per the user's own request, is
+    accuracy: showing precisely what was uploaded, not an AI's best guess
+    at what a variant might look like. Callers generate one of these per
+    uploaded variant photo (see list_variant_photos), so a batch of
+    several photos under the same or different names each becomes its own
+    card, labeled with that photo's own variant name."""
+    theme = _theme_colors(palette, True, custom_primary, custom_accent)
+    primary_hex = "#%02x%02x%02x" % theme["primary"]
+    accent_hex = "#%02x%02x%02x" % theme["accent"]
+    hint = brand_style_hint(framing)
+    brand_line = f" {hint}" if hint else ""
+    safe_zone_line = _frame_safe_zone_instruction(framing)
+    style_ref_line = _style_reference_instruction("varian", framing)
+    safe_name = variant_name.strip() or "Varian"
+    safe_product = product_name.strip() or "Produk"
+
+    prompt = (
+        f"Create a premium commercial product-variant showcase image for a "
+        f"{_brand_category_label(framing)} brand.{brand_line}{style_ref_line}\n\n"
+        f"NON-NEGOTIABLE: the product itself must be reproduced completely unchanged from "
+        f"the FIRST attached image — same exact shape, color, material, texture, pattern, "
+        f"proportions, and every visible detail, down to small attached parts. You are only "
+        f"placing that unchanged product into a new background/scene with a headline on top "
+        f"— not redesigning, restyling, recoloring, or reinterpreting the product in any way. "
+        f"This also means never \"improving\" it: no retouching, no smoothing over or "
+        f"removing scuffs/dust/imperfections/wear that are actually visible on it, no "
+        f"brightening or idealizing its color beyond a normal lighting change, no "
+        f"straightening or reshaping it, no completing or cleaning up a partially-worn "
+        f"label/logo/print — reproduce it exactly as-is, flaws included if any are visible. "
+        f"Equally, never remove, omit, crop out, shrink away, or simplify any part or detail "
+        f"of the product that's visible in the reference — everything that's there must stay "
+        f"there, in full. The only thing allowed to change is the surrounding scene, "
+        f"lighting, and camera angle — never the product itself. If nothing else in this "
+        f"prompt is followed precisely, this rule still must be.\n\n"
+        f"STYLE\n"
+        f"Modern, premium, dramatic commercial product photography, matching the reference "
+        f"image's own mood exactly (large dominant hero shot, dark moody environmental "
+        f"background, bold top headline). Inspired by {_style_benchmark(framing)} product "
+        f"advertisements.\n\n"
+        f"LAYOUT\n"
+        f"Square 1:1 social media poster. This image showcases ONE specific product variant "
+        f"— a large, tall hero shot of the exact product shown in the FIRST attached image, "
+        f"centered or slightly offset, echoing the reference image's own generous product "
+        f"scale STYLE only (never that reference's own product) but WITHOUT copying its "
+        f"product size literally — the reference was framed differently and its product may "
+        f"sit closer to the edges than what's safe here. The whole product, and this whole "
+        f"variant's distinguishing look, must be clearly, fully visible — not a tight macro "
+        f"crop — but sized so there is comfortable, visible empty space between every edge "
+        f"of the product and every edge of the frame. This includes any strap, cord, lace, "
+        f"buckle, tag, or other part that dangles or extends outward from the product's main "
+        f"body — when framing/cropping, measure the product's full extent by that outermost "
+        f"dangling part, not just its main body silhouette, so nothing gets cut off at any "
+        f"edge just because it sticks out further than the rest of the product. The "
+        f"safe-interior margins in the next paragraph are a hard limit, not a target to fill: "
+        f"if in doubt, size the product "
+        f"noticeably smaller with more breathing room rather than risk it touching, crowding, "
+        f"or extending toward the frame's border.\n\n"
+        f"{safe_zone_line}\n\n"
+        f"{_product_positioning_instruction()}\n\n"
+        f"{_ecommerce_readability_instruction()}\n\n"
+        f"Top-left ({round(_DEAD_ZONE_WIDTH_PCT*100)}% of width x {round(_DEAD_ZONE_HEIGHT_PCT*100)}% of height, "
+        f"measured from the very corner): render this rectangle as pure continuation of the "
+        f"background itself — same scene, same blur, same exposure as the rest of that "
+        f"photo. Do NOT draw any logo, badge, wordmark, text, or shape there — and just as "
+        f"importantly, do NOT draw any plain white/light card, plaque, panel, sign, or blank "
+        f"rectangle there either, even as a placeholder or empty design element. A real brand "
+        f"logo badge graphic gets composited there afterward at those exact pixels.\n\n"
+        f"PRODUCT ACCURACY (most important rule)\n"
+        f"The product must be pixel-accurate to the FIRST attached reference photo — exact "
+        f"real shape, color, material, texture, pattern, logo, and every visible detail — "
+        f"including any small attached part (straps, laces, cords, buckles, zippers, "
+        f"stitching, hanging tags, or any other accessory) rendered in full. Zero "
+        f"redesigning, zero substituting a similar-looking product or a different "
+        f"color/material than what's actually shown, and zero blending in any detail from "
+        f"the second (style-only) reference image. This card exists specifically to show "
+        f"what this ONE variant genuinely looks like, so never invent, adjust, idealize, "
+        f"retouch, or \"clean up\" its color/material/shape/condition away from the "
+        f"reference, and never drop, shrink, or simplify away any part of it either — every "
+        f"detail visible in the reference photo must be visible here too. The product must "
+        f"appear "
+        f"completely by itself: no person, hand, model, toy, or any other object next to, "
+        f"holding, or wearing it — only the product alone. Ultra realistic product "
+        f"photography, hyper-detailed high-resolution texture — every stitch, seam, grain, "
+        f"and surface detail crisp and clearly visible, never smoothed-over or low-detail — "
+        f"razor-sharp, perfectly in-focus, absolutely no blur or softness on it, dramatic "
+        f"lighting, natural shadow beneath the product.\n\n"
+        f"BACKGROUND\n"
+        + (
+            f"Use this exact scene, as given by the user, for the background: "
+            f"\"{scene_description.strip()}\". "
+            if scene_description and scene_description.strip()
+            else (
+                f"Look at the product itself in the FIRST attached image plus its name "
+                f"\"{safe_product}\" and figure out where this specific item actually gets "
+                f"used in real life — the scene must be a believable, specific real-world "
+                f"environment for THAT product (e.g. a wet construction site or rainy "
+                f"outdoor jobsite for rain boots/waterproof gear, a scaffolding or elevated "
+                f"structure for fall-protection harnesses, a workshop or factory floor for "
+                f"hand tools/PPE, a warehouse for industrial gear), never a generic, "
+                f"unrelated, or purely decorative backdrop chosen just because it looks nice. "
+            )
+        )
+        + f"{_background_mood_instruction(framing)} Keep it clean and uncluttered above "
+        f"everything else: minimal visual noise, no chaotic jumble of shapes/objects, "
+        f"shallow depth of field. Critically, the background's own dominant color/tone must "
+        f"stay visibly different from the product's own color in the FIRST attached image — "
+        f"never a near-identical hue or brightness that lets the product's silhouette blend "
+        f"into the scene behind it. If the believable real-world setting you picked would "
+        f"naturally share the product's color (e.g. a similarly-colored surface or wall), "
+        f"choose a different camera angle, distance, or a secondary surface/element within "
+        f"that same setting so the product still reads as clearly separated from its "
+        f"background at a glance. The overall result must read as a premium, professional "
+        f"commercial product campaign — polished lighting, believable context, nothing that "
+        f"looks staged, cheap, or randomly generated.\n\n"
+        f"HEADLINE\n"
+        f"Modern premium sans-serif typography, inspired by Helvetica Neue, Gotham, DIN, "
+        f"Montserrat ExtraBold. Excellent letter spacing. Clean hierarchy. No outline "
+        f"stroke. Soft natural shadow only. Professional kerning.\n\n"
+        f"Two lines: the FIRST line is the product's short, generic type name, smaller and "
+        f"plain white — a clearly secondary/supporting line, not competing with the variant "
+        f"name for attention. Directly below it, the SECOND line is the variant name, colored "
+        f"{accent_hex} (matching how the reference image colors its own variant word). Both "
+        f"spelled EXACTLY as given below, character for character, no typos, no extra or "
+        f"missing letters, each appearing exactly ONCE, no other word added anywhere.\n"
+        f"PRODUCT NAME (line 1, smaller, white, verbatim or a brief 2-5 word paraphrase if "
+        f"the literal string is long or full of SKU/marketing clutter, exactly once): "
+        f"\"{safe_product}\"\n"
+        f"VARIANT (line 2, colored {accent_hex}, verbatim, exactly once): \"{safe_name}\"\n\n"
+        f"Left-aligned, stacked vertically as two lines, always positioned along the LEFT "
+        f"side of the frame — never centered, never on the right side, and never floating "
+        f"over the product. This left alignment is fixed and non-negotiable. The vertical "
+        f"position, however, is flexible: prefer the upper-left area (below the reserved "
+        f"top-left rectangle) like the reference image, but if that spot would sit too "
+        f"close to the top frame border to leave comfortable margin, move the headline "
+        f"further down the left side instead — a lower placement is always better than "
+        f"crowding or risking any overlap with the top of the frame. Size the text to fit "
+        f"comfortably for this product photo and text length. The only two rules that "
+        f"always apply, no matter the exact size or vertical position: (1) it must "
+        f"never touch, cross, or run under the frame border described in the safe-interior "
+        f"paragraph above — treat that as the true edge of the canvas; (2) the headline's "
+        f"ENTIRE bounding box — both lines, every character, including the leftmost edge of "
+        f"the very first letter — must never overlap the reserved top-left rectangle "
+        f"described above by even one pixel (that space is for a logo badge composited in "
+        f"afterward; a badge is opaque, so any character straddling that boundary gets its "
+        f"left half silently erased and its right half left floating, which reads as broken, "
+        f"half-missing text — worse than not fitting at all). A headline that starts even "
+        f"slightly inside that rectangle and runs out the right side is NOT compliant, even "
+        f"if most of it ends up outside — the test is where it STARTS, not where it mostly "
+        f"sits. If there is any doubt, do not place the headline anywhere overlapping the "
+        f"top {round(_DEAD_ZONE_HEIGHT_PCT*100)}% of the frame's height while also within the "
+        f"left {round(_DEAD_ZONE_WIDTH_PCT*100)}% of its width — safe, unambiguous choices "
+        f"are starting the headline below that rectangle's bottom edge (lower on the frame), "
+        f"or starting it to the right of that rectangle's right edge, whichever reads better "
+        f"with this product's shape. Pick whichever size and line-wrapping makes both lines "
+        f"fit completely, comfortably, and legibly inside those two limits — a smaller, "
+        f"fully-compliant, fully-clear-of-both-zones title is always better than a larger one "
+        f"that bleeds into the border or even partially clips the reserved rectangle.\n\n"
+        f"COLOR PALETTE\n"
+        f"{primary_hex} (corporate accent), {accent_hex} (brand accent, used for the variant "
+        f"word in the headline), white, dark dramatic environmental tones.\n\n"
+        f"LIGHTING\n"
+        f"Cinematic dramatic lighting. Soft rim light. Ambient light. Global illumination. "
+        f"Realistic reflections. Photorealistic.\n\n"
+        f"QUALITY\n"
+        f"Award-winning advertising. Luxury commercial photography. Professional product "
+        f"campaign. Ultra realistic. Hyper detailed. 8K. Extremely sharp. No clutter. Minimal. "
+        f"Premium. The image must fill the entire square frame edge to edge — no borders, no "
+        f"blank margins, nothing cropped off. No watermarks, no UI chrome, no placeholder text "
+        f"anywhere other than the exact headline text specified above."
+    )
+
+    if extra_instruction.strip():
+        prompt += (
+            f"\n\nADDITIONAL USER INSTRUCTION (apply on top of everything above, without "
+            f"breaking any of the layout/safety rules already specified — and without "
+            f"loosening product accuracy: the product must still match the attached "
+            f"reference photo exactly in shape/color/material/every detail, regardless of "
+            f"what this instruction asks for): \"{extra_instruction.strip()}\""
+        )
+
+    try:
+        result_bytes = _generate_designed_card_image(prompt, cutout_photo, "varian", framing)
+        card = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
+        if card.size != CARD_SIZE:
+            card = _fit_on_blurred_canvas(card, CARD_SIZE)
+        _patch_dead_zone(card, theme["primary"], framing)
+        card.alpha_composite(_load_framing_image(framing))
+        return card
+    except Exception:
+        logger.exception("AI varian card generation failed for %s (%s)", product_name, variant_name)
         return None
 
 
@@ -2010,11 +2465,6 @@ def generate_ai_designed_usage_card(
     real_steps = [s for s in steps if s.get("caption")][:4]
     safe_zone_line = _frame_safe_zone_instruction(framing)
     style_ref_line = _style_reference_instruction("usage", framing)
-    subtitle_line = (
-        f" Beneath the heading, one short subtitle sentence in a lighter/thinner weight than "
-        f"the heading, white or very light gray, reading exactly: \"{subtitle}\""
-        if subtitle else ""
-    )
 
     prompt = (
         f"Create a premium commercial \"how to use\" product-instruction poster for a "
@@ -2059,20 +2509,33 @@ def generate_ai_designed_usage_card(
         f"the heading is left-aligned starting near the left edge. \"CARA\" in white, "
         f"\"PENGGUNAAN\" in {accent_hex}. Modern premium sans-serif typography (Helvetica "
         f"Neue / Gotham / DIN / Montserrat ExtraBold feel), bold, excellent letter spacing, "
-        f"soft natural drop shadow only, no outline stroke.{subtitle_line} This heading "
+        f"soft natural drop shadow only, no outline stroke. This heading "
         f"appears exactly ONCE on the entire card, right here in this band only — never "
         f"a second time, never partially repeated near the top-left corner or anywhere "
-        f"else. No other text anywhere in this band — do not repeat the product name.\n\n"
+        f"else. No other text anywhere in this band — do not repeat the product name. Even "
+        f"though the reference image shows a row of small feature icons (e.g. a shield, a "
+        f"feather, a badge, each with a short one-word label) directly beneath its own "
+        f"heading, do NOT include that icon row here — this band contains ONLY the two-line "
+        f"heading and nothing else beneath it; leave that space as plain continuation of "
+        f"the background instead.\n\n"
         f"MIDDLE BAND (the middle ~55% of the frame):\n"
-        f"The exact product shown in the attached reference image as the hero, large scale, "
+        f"The exact product shown in the FIRST attached image (the real product photo) as "
+        f"the hero, large scale, "
         f"prominently centered, ultra realistic product photography, shown completely by "
         f"itself with no person, hand, model, toy, or other object next to or holding it in "
-        f"this main hero shot. Preserve its exact real shape/colors/materials/logo, with "
-        f"every part and component fully present exactly as in the reference image — do not "
-        f"redesign or leave out any part of it. Natural realistic shadow, soft "
-        f"reflection on a wet/glossy floor if applicable, cinematic lighting, extremely "
-        f"detailed texture, sharp focus on the product with the background in a gentle "
-        f"shallow depth of field.{scene_hint} The product must stay fully inside this middle "
+        f"this main hero shot. Must match the FIRST attached image (the real product photo) "
+        f"exactly — same shape, same colors, same materials/textures, same logo and every "
+        f"printed label/text on it, same proportions between its parts — with every single "
+        f"part and component fully present, including every small attached part (straps, "
+        f"laces, cords, buckles, zippers, stitching, hanging tags, or any other small "
+        f"accessory attached to the product) — none of these may be omitted, shortened, "
+        f"simplified, merged together, or redesigned even slightly just because they're "
+        f"small. Natural realistic shadow, soft "
+        f"reflection on a wet/glossy floor if applicable, cinematic lighting, hyper-detailed "
+        f"high-resolution texture — every stitch, seam, grain, and surface detail crisp and "
+        f"clearly visible, never smoothed-over or low-detail — razor-sharp, perfectly "
+        f"in-focus product, absolutely no blur or softness on it, with the background in a "
+        f"gentle shallow depth of field.{scene_hint} The product must stay fully inside this middle "
         f"band, never extending up into the heading band or down into the footer band below. "
         f"The lowest edge of the product must sit above 64% of the poster height; the footer "
         f"band starts below that and must not cover the product.\n\n"
@@ -2096,17 +2559,15 @@ def generate_ai_designed_usage_card(
         f"exactly. Each circle shows a photorealistic close-up of a person's hands "
         f"or feet actually performing that specific step with this exact product (preserve "
         f"the product's real appearance in every circle) — not the same repeated shot, a "
-        f"different moment per step. Beneath each circle: a short bold white title line "
-        f"with only a soft natural drop shadow for contrast (no colored panel or box behind "
-        f"the text itself), then a shorter, thinner, light-gray description line right "
-        f"below it — two visually distinct lines, not one run-on sentence.\n\n"
-        f"Step-by-step, left to right — each circle's photo content and the title/description "
+        f"different moment per step. Beneath each circle: only a short bold white title line, "
+        f"with a soft natural drop shadow for contrast (no colored panel or box behind the "
+        f"text itself) — no second line, no smaller description text underneath it.\n\n"
+        f"Step-by-step, left to right — each circle's photo content and the title "
         f"beneath it must always be this exact matching set, never mixed up with another "
         f"step's:\n"
         + "\n".join(
             f"Step {i + 1}: photo = {s.get('scene') or s['caption']}; "
-            f"bold title beneath it, spelled exactly = \"{s['caption']}\""
-            + (f"; lighter description beneath the title, spelled exactly = \"{s['desc']}\"" if s.get("desc") else "")
+            f"bold title beneath it (its only line of text), spelled exactly = \"{s['caption']}\""
             for i, s in enumerate(real_steps)
         ) + "\n\n"
         f"COLOR PALETTE\n"
@@ -2136,7 +2597,7 @@ def generate_ai_designed_usage_card(
         card = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
         if card.size != CARD_SIZE:
             card = _fit_on_blurred_canvas(card, CARD_SIZE)
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
         card.alpha_composite(_load_framing_image(framing))
         return card
     except Exception:
@@ -2235,7 +2696,8 @@ def generate_ai_designed_spec_card(
         f"afterward at those exact pixels, so anything drawn there gets covered up or "
         f"clashes with it.\n\n"
         f"LEFT SIDE:\n"
-        f"The exact product shown in the attached reference image as the hero, framed the "
+        f"The exact product shown in the FIRST attached image (the real product photo) as "
+        f"the hero, framed the "
         f"way a real marketplace/e-commerce listing photo (Shopee, Tokopedia, Amazon) frames "
         f"its main product shot: large, dominant, and unmistakably the focal point, filling "
         f"roughly half to two-thirds of this side's height, never small, distant, or lost in "
@@ -2249,14 +2711,20 @@ def generate_ai_designed_spec_card(
         f"unnatural pose even if the reference photo itself was cropped or awkwardly angled. "
         f"Every real detail — shape, texture, color, logo, printed text on the product — must "
         f"stay sharp, crisp, and clearly legible even at a glance, exactly as it is in the "
-        f"reference photo, with every part and component fully present — do not redesign, "
-        f"restyle, recolor, or leave out any part of the product itself. The product must "
+        f"FIRST attached image (the real product photo), with every part and component fully "
+        f"present, including every small attached part (straps, laces, cords, buckles, "
+        f"zippers, stitching, hanging tags, or any other small accessory attached to the "
+        f"product) — none of these may be omitted, shortened, simplified, or merged together "
+        f"just because they're small — do not redesign, restyle, recolor, or leave out any "
+        f"part of the product itself. The product must "
         f"appear completely by itself: no person, hand, model, toy, or any other object next "
         f"to, holding, or wearing it — only the product alone. Ultra realistic product "
         f"photography, natural realistic shadow, "
-        f"cinematic lighting, extremely detailed texture, sharp focus on the product with "
-        f"the background in a gentle shallow depth of field so it stays clearly secondary "
-        f"and never competes with the product.{scene_hint}\n\n"
+        f"cinematic lighting, hyper-detailed high-resolution texture — every stitch, seam, "
+        f"grain, and surface detail crisp and clearly visible, never smoothed-over or "
+        f"low-detail — razor-sharp, perfectly in-focus product, absolutely no blur or "
+        f"softness on it, with the background in a gentle shallow depth of field so it stays "
+        f"clearly secondary and never competes with the product.{scene_hint}\n\n"
         f"RIGHT SIDE (top to bottom):\n"
         f"1. Product title, spelled EXACTLY as given, no word or line repeated/duplicated "
         f"anywhere — appears exactly ONCE on the card: \"{product_name}\" — large bold "
@@ -2316,7 +2784,7 @@ def generate_ai_designed_spec_card(
         card = Image.open(io.BytesIO(result_bytes)).convert("RGBA")
         if card.size != CARD_SIZE:
             card = _cover_crop(card, CARD_SIZE)
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
         card.alpha_composite(_load_framing_image(framing))
         return card
     except Exception:
@@ -2858,7 +3326,7 @@ def compose_keypoint_card(
         # any text/badges are drawn — the AI scene model's own attempt at
         # keeping that area "calm" often leaves a visible hazy box there
         # instead of blending naturally.
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
     elif background_photo is not None:
         # No tint/scrim at all — the background photo stays fully clear and
         # vivid, exactly as generated. Text legibility comes from the drop
@@ -3242,7 +3710,7 @@ def compose_spec_card(
     # the top-left corner "calm" for the logo often leaves a visible hazy
     # box there instead of blending naturally, so patch it first.
     if full_scene_photo is not None:
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
     framing_image = _load_framing_image(framing)
     card.alpha_composite(framing_image)
     card = _ai_add_typography(card, "\n".join(text_instructions), framing)
@@ -3315,7 +3783,7 @@ def compose_usage_card(
         # instead of blending naturally. Must happen before the heading
         # below, not after, or this would blur out the real heading text
         # too instead of just the background underneath it.
-        _patch_dead_zone(card, theme["primary"])
+        _patch_dead_zone(card, theme["primary"], framing)
     elif background_photo is not None:
         card = _cover_crop(background_photo.convert("RGBA"), CARD_SIZE)
     else:

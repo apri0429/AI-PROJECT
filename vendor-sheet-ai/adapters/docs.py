@@ -546,30 +546,58 @@ _DRIVE_FILE_RE = re.compile(r"/file/d/([a-zA-Z0-9_-]+)")
 _DRIVE_ID_PARAM_RE = re.compile(r"[?&]id=([a-zA-Z0-9_-]+)")
 
 
+_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+
+def _list_images_in_folder_recursive(
+    drive, folder_id: str, *, max_depth: int = 4, max_results: int = 60,
+) -> list[dict[str, str]]:
+    """Collect every image file under folder_id, including ones nested in
+    subfolders — the sheet's marketing picture folder sometimes organizes
+    photos into subfolders (by color, angle, etc.) instead of dropping them
+    all directly inside it. Breadth-first, capped at max_depth levels and
+    max_results images so a huge/misconfigured folder tree can't run away."""
+    images: list[dict[str, str]] = []
+    queue: list[tuple[str, int]] = [(folder_id, 0)]
+
+    while queue and len(images) < max_results:
+        current_id, depth = queue.pop(0)
+        try:
+            results = drive.files().list(
+                q=f"'{current_id}' in parents and trashed = false",
+                fields="files(id, name, mimeType)",
+                orderBy="name",
+                pageSize=100,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="allDrives",
+            ).execute()
+        except Exception:
+            logger.exception("Failed to list Drive folder %s", current_id)
+            continue
+
+        for f in results.get("files", []):
+            mime = f.get("mimeType", "")
+            if mime.startswith("image/"):
+                images.append({"id": f["id"], "name": f["name"]})
+                if len(images) >= max_results:
+                    break
+            elif mime == _FOLDER_MIME_TYPE and depth < max_depth:
+                queue.append((f["id"], depth + 1))
+
+    return images
+
+
 def _resolve_drive_file_id(drive, url: str) -> str | None:
     """Resolve a Google Drive link (file or folder) to the id of an actual
     image FILE, without downloading anything. The "LINK MARKETING PICTURE"
     column usually points at a Drive FOLDER of marketing pictures for that
     product rather than a single image file — in that case the first image
-    found inside the folder is used."""
+    found (searching subfolders too) is used."""
     folder_match = _DRIVE_FOLDER_RE.search(url)
     if folder_match:
-        folder_id = folder_match.group(1)
-        try:
-            results = drive.files().list(
-                q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed = false",
-                fields="files(id, name)",
-                orderBy="name",
-                pageSize=1,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
-                corpora="allDrives",
-            ).execute()
-            files = results.get("files", [])
-            return files[0]["id"] if files else None
-        except Exception:
-            logger.exception("Failed to list marketing picture folder %s", folder_id)
-            return None
+        images = _list_images_in_folder_recursive(drive, folder_match.group(1), max_results=1)
+        return images[0]["id"] if images else None
 
     file_match = _DRIVE_FILE_RE.search(url) or _DRIVE_ID_PARAM_RE.search(url)
     return file_match.group(1) if file_match else None
@@ -587,6 +615,42 @@ def _normalize_to_png_bytes(content: bytes) -> bytes | None:
         return buffer.getvalue()
     except Exception:
         return None
+
+
+def list_marketing_picture_candidates(marketing_link: str) -> list[dict[str, str]]:
+    """Resolve the sheet's LINK MARKETING PICTURE column to every candidate
+    image the user could pick from — every image under the folder if it's a
+    Drive folder link, including ones nested in subfolders (rather than
+    only the ones sitting directly inside it), or the single file if it's a
+    direct Drive file link. A plain (non-Drive) image URL isn't a Drive
+    file, so it isn't listable here — the caller should keep treating that
+    case as a single automatic photo, same as before."""
+    link = (marketing_link or "").strip()
+    if not link:
+        return []
+
+    folder_match = _DRIVE_FOLDER_RE.search(link)
+    if folder_match:
+        drive = drive_service()
+        return _list_images_in_folder_recursive(drive, folder_match.group(1))
+
+    file_match = _DRIVE_FILE_RE.search(link) or _DRIVE_ID_PARAM_RE.search(link)
+    if file_match:
+        return [{"id": file_match.group(1), "name": "photo"}]
+
+    return []
+
+
+def fetch_marketing_picture_candidate_bytes(file_id: str) -> bytes | None:
+    """Download one specific candidate image by Drive file id, as returned
+    by list_marketing_picture_candidates."""
+    try:
+        drive = drive_service()
+        content = drive.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+    except Exception:
+        logger.exception("Failed to fetch marketing picture candidate %s", file_id)
+        return None
+    return _normalize_to_png_bytes(content) if content else None
 
 
 def fetch_marketing_picture_bytes(marketing_link: str) -> bytes | None:
