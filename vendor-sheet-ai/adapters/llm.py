@@ -13,7 +13,7 @@ _client = None
 
 if settings.gemini_api_key:
     try:
-        from google import  
+        from google import genai
         from google.genai import types as genai_types
 
         _client = genai.Client(api_key=settings.gemini_api_key)
