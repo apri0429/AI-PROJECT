@@ -1236,11 +1236,6 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
     }
   };
 
-  const openRefine = (card) => {
-    setRefineInstruction("");
-    setRefineCard(card.key);
-  };
-
   const closeRefine = () => {
     setRefineCard(null);
     setRefineInstruction("");
@@ -1731,7 +1726,7 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                 </div>
               </div>
               <p className="im-subtitle gallery-result-subtitle">
-                Hasil terakhir untuk produk ini. Ganti setting lalu generate ulang, atau klik ikon <strong>Perbaiki</strong> di kartu buat revisi langsung.
+                Hasil terakhir untuk produk ini. Ganti setting lalu generate ulang, hapus frame, atau download gambar yang sudah jadi.
               </p>
               <div className="gallery-card-results">
                 {visibleResultCards.map((card) => (
@@ -1750,39 +1745,7 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                       {card.url && (
                         <button
                           type="button"
-                          className="gallery-card-download-btn"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (refineCard === card.key) {
-                              closeRefine();
-                            } else {
-                              openRefine(card);
-                            }
-                          }}
-                          disabled={refiningKey === card.key}
-                          title="Perbaiki kartu (pakai AI, ketik instruksi bebas)"
-                          aria-label="Perbaiki kartu (pakai AI, ketik instruksi bebas)"
-                        >
-                          {refiningKey === card.key ? (
-                            <span className="button-spinner" />
-                          ) : (
-                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true">
-                              <path
-                                d="M4 20l1.1-3.9a3 3 0 0 1 .78-1.32l9.3-9.3a1.9 1.9 0 0 1 2.69 0l1.65 1.65a1.9 1.9 0 0 1 0 2.69l-9.3 9.3a3 3 0 0 1-1.32.78L4 20Z"
-                                stroke="currentColor"
-                                strokeWidth="1.6"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <path d="M13 5.5 18.5 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                            </svg>
-                          )}
-                        </button>
-                      )}
-                      {card.url && (
-                        <button
-                          type="button"
-                          className="gallery-card-download-btn"
+                          className="gallery-card-download-btn gallery-card-remove-frame-btn"
                           onClick={(event) => {
                             event.stopPropagation();
                             handleRemoveFrame(card);
@@ -1827,7 +1790,7 @@ function GalleryWorkspace({ productName, framing, onChangeFraming, onBack, onOpe
                         </a>
                       )}
                     </div>
-                    {refineCard === card.key && (
+                    {refineCard === card.key && refiningKey === "__disabled__" && (
                       <div className="gallery-card-refine-box" onClick={(event) => event.stopPropagation()}>
                         <textarea
                           className="gallery-card-refine-textarea"

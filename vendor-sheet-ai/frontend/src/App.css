@@ -13188,8 +13188,332 @@
   background: none !important;
 }
 
+/* Final polish for ImagePage controls: keep the theme color row tall enough
+   to show the swatch/select cleanly and make destructive frame removal look
+   distinct from Download. */
+.gallery-panel-content-workspace .piagam-theme-panel {
+  gap: 6px !important;
+  overflow: visible !important;
+}
+
+.gallery-panel-content-workspace .piagam-theme-grid {
+  gap: 6px !important;
+  overflow: visible !important;
+}
+
+.gallery-panel-content-workspace .gallery-palette-select-row {
+  width: min(100%, 245px) !important;
+  min-height: 34px !important;
+  padding: 4px !important;
+  grid-template-columns: 34px minmax(160px, 1fr) !important;
+  align-items: center !important;
+  overflow: visible !important;
+}
+
+.gallery-panel-content-workspace .gallery-palette-select {
+  min-width: 160px !important;
+  min-height: 28px !important;
+  line-height: 1.2 !important;
+  padding-right: 24px !important;
+}
+
+.gallery-panel-content-workspace .gallery-palette-select-preview {
+  width: 30px !important;
+  height: 24px !important;
+  align-self: center !important;
+}
+
+.gallery-panel-content-workspace .gallery-card-remove-frame-btn {
+  border-color: rgba(180, 35, 24, 0.42) !important;
+  background: rgba(180, 35, 24, 0.1) !important;
+  color: #b42318 !important;
+}
+
+.gallery-panel-content-workspace .gallery-card-remove-frame-btn:hover:not(:disabled) {
+  border-color: rgba(180, 35, 24, 0.68) !important;
+  background: rgba(180, 35, 24, 0.18) !important;
+  color: #8f1d14 !important;
+}
+
+@media (min-width: 941px) {
+  .im-content-body.gallery-panel-content-workspace {
+    overflow: hidden !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-generate-workspace,
+  .gallery-panel-content-workspace .piagam-generate-left {
+    gap: 10px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-generate-panel {
+    padding: 10px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-field {
+    gap: 4px !important;
+    padding: 6px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-grid {
+    grid-template-columns: minmax(210px, 0.9fr) minmax(260px, 1.1fr) !important;
+    align-items: end !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-grid .piagam-theme-field:first-child {
+    grid-row: span 2;
+    align-self: stretch;
+  }
+
+  .gallery-panel-content-workspace .gallery-palette-select-row {
+    width: 100% !important;
+    grid-template-columns: 34px minmax(0, 1fr) !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-palette-select {
+    min-width: 0 !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-field {
+    margin-top: 0 !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-row,
+  .gallery-panel-content-workspace .gallery-scene-row {
+    min-height: 30px !important;
+    gap: 6px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-input,
+  .gallery-panel-content-workspace .gallery-scene-input {
+    min-height: 28px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-panel .gallery-control-eyebrow {
+    padding-right: 150px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-panel .gallery-advanced-launcher {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    margin: 0 !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-panel .gallery-advanced-open-btn {
+    width: auto !important;
+    min-height: 32px !important;
+  }
+}
+
+@media (min-width: 941px) and (max-height: 760px) {
+  .im-content-body.gallery-panel-content-workspace {
+    padding: 8px 10px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-workspace-hero {
+    min-height: auto !important;
+    padding: 7px 10px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-generate-workspace,
+  .gallery-panel-content-workspace .piagam-generate-left,
+  .gallery-panel-content-workspace .piagam-generate-right {
+    gap: 8px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-generate-panel {
+    padding: 8px !important;
+    border-radius: 18px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-section-label.gallery-photo-title,
+  .gallery-panel-content-workspace .gallery-card-type-header,
+  .gallery-panel-content-workspace .gallery-control-eyebrow,
+  .gallery-panel-content-workspace .gallery-result-topbar {
+    min-height: 22px !important;
+    margin-bottom: 5px !important;
+    padding-bottom: 5px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-grid {
+    gap: 5px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-field {
+    padding: 5px !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-field > .image-count-label {
+    font-size: 11px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-palette-select-row,
+  .gallery-panel-content-workspace .gallery-scene-row,
+  .gallery-panel-content-workspace .gallery-manual-prompt-row {
+    min-height: 28px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-palette-select,
+  .gallery-panel-content-workspace .gallery-scene-input,
+  .gallery-panel-content-workspace .gallery-manual-prompt-input {
+    min-height: 26px !important;
+    font-size: 11.5px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-card-results {
+    gap: 7px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-card-preview-link,
+  .gallery-panel-content-workspace .gallery-card-empty {
+    max-height: clamp(150px, 25vh, 190px) !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-result-subtitle {
+    margin-bottom: 6px !important;
+    font-size: 11.5px !important;
+    line-height: 1.35 !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-bottom-actions {
+    margin-top: 8px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-command-btn {
+    min-height: 36px !important;
+  }
+}
+
+@media (min-width: 941px) and (max-width: 1180px) {
+  .gallery-panel-content-workspace .piagam-theme-grid {
+    grid-template-columns: minmax(190px, 0.85fr) minmax(240px, 1.15fr) !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-scene-row,
+  .gallery-panel-content-workspace .gallery-manual-prompt-row {
+    grid-template-columns: 118px minmax(0, 1fr) !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-row .gallery-toggle-switch-option {
+    min-width: 118px !important;
+  }
+}
+
+@media (max-width: 940px) {
+  .im-content-body.gallery-panel-content-workspace {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .gallery-panel-content-workspace .piagam-theme-grid .piagam-theme-field:first-child {
+    grid-row: auto !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-palette-select-row {
+    width: 100% !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-scene-row,
+  .gallery-panel-content-workspace .gallery-manual-prompt-row {
+    grid-template-columns: 1fr !important;
+    align-items: stretch !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-row {
+    display: grid !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-manual-prompt-row .gallery-toggle-switch-option {
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 940px) {
+  .gallery-panel-content-workspace .gallery-advanced-launcher {
+    position: static !important;
+    width: 100% !important;
+    margin-top: 2px !important;
+  }
+
+  .gallery-panel-content-workspace .gallery-advanced-open-btn {
+    width: 100% !important;
+    min-height: 38px !important;
+  }
+}
+
 /* Image generation turns in the main chat — attached reference photos on
    the user's message, generated results on the assistant's. */
+
+/* Keep the ImagePage workspace contained inside the main card. These rules
+   prevent long labels, action groups, and result cards from spilling past
+   the rounded card without adding an internal scrollbar. */
+.im-content-body.gallery-panel-content-workspace {
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.gallery-panel-content-workspace *,
+.gallery-panel-content-workspace *::before,
+.gallery-panel-content-workspace *::after {
+  box-sizing: border-box;
+}
+
+.gallery-panel-content-workspace .gallery-workspace,
+.gallery-panel-content-workspace .gallery-workspace-hero,
+.gallery-panel-content-workspace .piagam-generate-workspace,
+.gallery-panel-content-workspace .piagam-generate-left,
+.gallery-panel-content-workspace .piagam-generate-right,
+.gallery-panel-content-workspace .gallery-workspace-left-row,
+.gallery-panel-content-workspace .gallery-workspace-left,
+.gallery-panel-content-workspace .gallery-workspace-right,
+.gallery-panel-content-workspace .piagam-generate-panel,
+.gallery-panel-content-workspace .gallery-card-results,
+.gallery-panel-content-workspace .gallery-card-result,
+.gallery-panel-content-workspace .gallery-card-result-title,
+.gallery-panel-content-workspace .gallery-bottom-actions,
+.gallery-panel-content-workspace .gallery-workspace-actions {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+.gallery-panel-content-workspace .gallery-workspace-hero,
+.gallery-panel-content-workspace .gallery-workspace-actions,
+.gallery-panel-content-workspace .gallery-bottom-actions {
+  flex-wrap: wrap !important;
+}
+
+.gallery-panel-content-workspace .gallery-card-result-label,
+.gallery-panel-content-workspace .gallery-product-name,
+.gallery-panel-content-workspace .gallery-workspace-product-copy,
+.gallery-panel-content-workspace .gallery-card-type-heading,
+.gallery-panel-content-workspace .gallery-photo-title-text {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.gallery-panel-content-workspace .gallery-card-result-title {
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.gallery-panel-content-workspace .gallery-card-download-btn {
+  flex: 0 0 auto !important;
+}
+
+.gallery-panel-content-workspace .gallery-command-btn,
+.gallery-panel-content-workspace .gallery-framing-change-btn,
+.gallery-panel-content-workspace .gallery-back-btn,
+.gallery-panel-content-workspace .im-reset-btn {
+  max-width: 100% !important;
+}
 
 .ichat-attachment-strip {
   display: flex;

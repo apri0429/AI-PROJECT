@@ -2,11 +2,14 @@
     "python.defaultInterpreterPath": "C:\\Python313\\python.exe",
     "python.analysis.extraPaths": [
         "${workspaceFolder}\\vendor-sheet-ai",
-        "./vendor-sheet-ai"
+        "./vendor-sheet-ai",
+        "C:\\Users\\IT\\AppData\\Roaming\\Python\\Python313\\site-packages"
     ],
     "python.autoComplete.extraPaths": [
         "${workspaceFolder}\\vendor-sheet-ai",
-        "./vendor-sheet-ai"
+        "./vendor-sheet-ai",
+        "C:\\Users\\IT\\AppData\\Roaming\\Python\\Python313\\site-packages"
     ],
-    "python.analysis.pythonVersion": "3.13"
+    "python.analysis.pythonVersion": "3.13",
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

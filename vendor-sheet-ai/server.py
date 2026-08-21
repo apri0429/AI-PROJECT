@@ -78,7 +78,12 @@ from adapters.llm import answer_question, edit_image, generate_image
 from adapters.pdf_translate import SUPPORTED_EXTENSIONS, translate_document_to_indonesian
 from adapters.sheets import SheetFetchError
 from config import settings
-from core.prompts import FONT_THEME_OPTIONS, build_chat_prompt, select_relevant_rows
+from core.prompts import (
+    FONT_THEME_OPTIONS,
+    build_chat_prompt,
+    select_relevant_rows,
+    wants_all_product_names,
+)
 from services.pipeline import (
     fetch_product_detail,
     process_file,
@@ -328,6 +333,234 @@ def _find_row_by_product_name(product_name: str) -> dict | None:
     return None
 
 
+_PRODUCT_QUERY_STOPWORDS = {
+    "ada", "apa", "aja", "saja", "yang", "dan", "atau", "dari", "untuk",
+    "berapa", "jumlah", "total", "banyak", "baris", "row", "rows", "data",
+    "produk", "product", "products", "barang", "item", "nama", "name",
+    "names", "list", "daftar", "tampilkan", "munculin", "munculkan", "show",
+    "semua", "all", "cari", "search", "cek", "check", "di", "ke", "nya",
+    "dong", "tolong", "please", "database", "db", "table", "tabel",
+    "merek", "merk", "brand", "punya", "kamu", "aku", "sistem",
+    "produknya", "datanya", "mereknya", "merknya", "brandnya",
+    "berapa?", "ya", "yah", "sih", "nih", "ini", "itu",
+}
+
+
+def _message_tokens(message: str) -> set[str]:
+    return set(re.findall(r"[a-zA-Z0-9]+", message.lower()))
+
+
+def _product_query_terms(message: str) -> list[str]:
+    return [
+        token
+        for token in re.findall(r"[a-zA-Z0-9]+", message.lower())
+        if len(token) >= 2 and token not in _PRODUCT_QUERY_STOPWORDS
+    ]
+
+
+def _row_matches_terms(row: dict, terms: list[str]) -> bool:
+    if not terms:
+        return False
+    product_text = str(row.get("product_name") or "").lower()
+    vendor_text = str(row.get("vendor_name") or "").lower()
+    brand_text = str(row.get("brand") or "").lower()
+    searchable = " ".join((product_text, vendor_text, brand_text))
+    return all(term in searchable for term in terms)
+
+
+def _row_matches_any_term(row: dict, terms: list[str]) -> bool:
+    if not terms:
+        return False
+    product_text = str(row.get("product_name") or "").lower()
+    vendor_text = str(row.get("vendor_name") or "").lower()
+    brand_text = str(row.get("brand") or "").lower()
+    searchable = " ".join((product_text, vendor_text, brand_text))
+    return any(term in searchable for term in terms)
+
+
+def _row_matches_terms_anywhere(row: dict, terms: list[str]) -> bool:
+    if not terms:
+        return False
+    searchable = " ".join(str(value).lower() for value in row.values())
+    return all(term in searchable for term in terms)
+
+
+def _unique_product_names(rows: list[dict]) -> list[str]:
+    names = [
+        str(row.get("product_name") or "").strip()
+        for row in rows
+        if str(row.get("product_name") or "").strip()
+    ]
+    return list(dict.fromkeys(names))
+
+
+def _build_product_database_message(message: str) -> dict | None:
+    text = message.lower()
+    tokens = _message_tokens(message)
+    count_intent = bool(tokens & {"berapa", "jumlah", "total", "banyak", "count"})
+    list_intent = (
+        bool(tokens & {"list", "daftar", "tampilkan", "munculin", "munculkan", "show"})
+        or "apa aja" in text
+        or "apa saja" in text
+    )
+    search_intent = bool(tokens & {"ada", "cari", "search", "cek", "check"})
+    terms = _product_query_terms(message)
+    product_context = (
+        bool(tokens & {"produk", "product", "products", "barang", "item", "data"})
+        or bool(terms)
+    )
+    if not product_context or not (count_intent or list_intent or search_intent):
+        return None
+
+    rows = StateStore().get_all_rows()
+    if not rows:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "text": "Belum ada data produk yang tersimpan. Link atau upload sheet dulu ya.",
+        }
+
+    matched_rows = [row for row in rows if _row_matches_terms(row, terms)] if terms else rows
+    match_scope = "nama produk/vendor/brand" if terms else "semua data"
+    if terms and not matched_rows:
+        matched_rows = [row for row in rows if _row_matches_terms_anywhere(row, terms)]
+        match_scope = "seluruh field database"
+    if terms and not matched_rows:
+        matched_rows = [row for row in rows if _row_matches_any_term(row, terms)]
+        match_scope = "sebagian keyword di nama produk/vendor/brand"
+    matched_names = _unique_product_names(matched_rows)
+    term_label = ", ".join(terms) if terms else "semua data"
+
+    if count_intent:
+        if not matched_names:
+            return {
+                "role": "assistant",
+                "type": "text",
+                "text": f"Aku belum menemukan nama produk yang cocok dengan: {term_label}.",
+            }
+        lines = [
+            f"Angka utama: {len(matched_names)} nama produk unik cocok dengan \"{term_label}\".",
+            f"Catatan: kalau yang dihitung semua row/varian di sheet, jumlahnya {len(matched_rows)}.",
+            f"Pencarian ini dihitung langsung dari database berdasarkan {match_scope}, bukan dari tebakan AI.",
+        ]
+        if matched_names and len(matched_names) <= 30:
+            lines.append("")
+            lines.extend(f"{index}. {name}" for index, name in enumerate(matched_names, start=1))
+        elif matched_names:
+            lines.append("Minta 'list produk [kata kunci]' kalau mau semua namanya ditampilkan.")
+        return {"role": "assistant", "type": "text", "text": "\n".join(lines)}
+
+    if list_intent:
+        if not matched_names:
+            return {
+                "role": "assistant",
+                "type": "text",
+                "text": f"Aku belum menemukan produk yang cocok dengan: {term_label}.",
+            }
+        lines = [
+            f"Ditemukan {len(matched_names)} nama produk unik untuk \"{term_label}\".",
+            f"Total row/varian terkait: {len(matched_rows)}.",
+        ]
+        lines.extend(f"{index}. {name}" for index, name in enumerate(matched_names, start=1))
+        return {"role": "assistant", "type": "text", "text": "\n".join(lines)}
+
+    if search_intent and terms:
+        if not matched_names:
+            text = f"Belum ketemu produk yang cocok dengan: {term_label}."
+        else:
+            preview = "\n".join(f"{index}. {name}" for index, name in enumerate(matched_names[:20], start=1))
+            suffix = f"\n...dan {len(matched_names) - 20} lagi." if len(matched_names) > 20 else ""
+            text = (
+                f"Ada {len(matched_names)} nama produk unik yang cocok dengan \"{term_label}\".\n"
+                f"Total row/varian terkait: {len(matched_rows)}.\n"
+                f"{preview}{suffix}"
+            )
+        return {"role": "assistant", "type": "text", "text": text}
+
+    return None
+
+
+def _build_deterministic_chat_message(conversation_id: int, message: str) -> dict | None:
+    return (
+        _build_product_database_message(message)
+        or _build_all_product_names_message(message)
+        or _build_available_fields_message(message)
+        or _build_doc_from_previous_template_message(conversation_id, message)
+        or _build_doc_choice_message(message)
+        or _build_description_template_with_doc_message(message)
+        or _build_description_doc_message(message)
+        or _build_instruction_doc_message(message)
+    )
+
+
+def _build_all_product_names_message(message: str) -> dict | None:
+    if not wants_all_product_names(message):
+        return None
+
+    rows = StateStore().get_all_rows()
+    names = [
+        str(row.get("product_name") or "").strip()
+        for row in rows
+        if str(row.get("product_name") or "").strip()
+    ]
+    unique_names = list(dict.fromkeys(names))
+    if not unique_names:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "text": "Belum ada nama produk yang tersimpan di database. Link atau upload sheet dulu ya.",
+        }
+
+    lines = [f"Total produk: {len(unique_names)}"]
+    lines.extend(f"{index}. {name}" for index, name in enumerate(unique_names, start=1))
+    lines.append("")
+    lines.append("Kalau mau data lengkap satu produk, sebutkan nama produknya. Nanti aku tampilkan semua field yang tersedia dari sheet dan detail link kalau ada.")
+
+    return {"role": "assistant", "type": "text", "text": "\n".join(lines)}
+
+
+def _build_available_fields_message(message: str) -> dict | None:
+    text = message.lower()
+    asks_about_data_shape = (
+        "data apa" in text
+        or "data apanya" in text
+        or "field apa" in text
+        or "kolom apa" in text
+        or "column apa" in text
+        or "isi datanya" in text
+    )
+    if not asks_about_data_shape:
+        return None
+
+    rows = StateStore().get_all_rows()
+    if not rows:
+        return {
+            "role": "assistant",
+            "type": "text",
+            "text": "Belum ada data sheet yang tersimpan. Link atau upload sheet dulu, nanti aku bisa baca nama produk, vendor, spesifikasi, varian, dan field lain yang ada di sheet.",
+        }
+
+    field_counts: dict[str, int] = {}
+    for row in rows:
+        for key, value in row.items():
+            if key in {"source", "row_index"}:
+                continue
+            if str(value or "").strip():
+                field_counts[key] = field_counts.get(key, 0) + 1
+
+    lines = [
+        f"Database sekarang berisi {len(rows)} row produk/vendor sheet.",
+        "Field yang ada dan terisi:",
+    ]
+    for key, count in sorted(field_counts.items(), key=lambda item: (-item[1], item[0])):
+        label = key.replace("_", " ").title()
+        lines.append(f"- {label}: terisi di {count} row")
+
+    lines.append("")
+    lines.append("Aku bisa jawab daftar semua nama produk, cari produk tertentu, tampilkan data lengkap satu produk, buat description building, atau buat Google Doc instruction manual/deskripsi.")
+    return {"role": "assistant", "type": "text", "text": "\n".join(lines)}
+
+
 def _build_doc_from_previous_template_message(conversation_id: int, message: str) -> dict | None:
     if not _wants_doc_from_previous_template(message):
         return None
@@ -504,7 +737,7 @@ def _answer_chat_message(message: str) -> str:
             for row, detail in zip(rows_with_links, details):
                 row["product_detail"] = detail
 
-    prompt = build_chat_prompt(message, selected)
+    prompt = build_chat_prompt(message, selected, total_row_count=len(rows))
     return answer_question(prompt)
 
 
@@ -515,18 +748,12 @@ def chat(payload: ChatRequest) -> dict:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        assistant_message = (
-            _build_doc_from_previous_template_message(payload.conversation_id, message)
-            or _build_doc_choice_message(message)
-            or _build_description_template_with_doc_message(message)
-            or _build_description_doc_message(message)
-            or _build_instruction_doc_message(message)
-        )
+        assistant_message = _build_deterministic_chat_message(payload.conversation_id, message)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Failed to generate description doc from chat")
-        raise HTTPException(status_code=500, detail="Failed to generate Google Doc") from exc
+        logger.exception("Failed to generate deterministic chat response")
+        raise HTTPException(status_code=500, detail="Failed to generate chat response") from exc
 
     if assistant_message is None:
         answer = _answer_chat_message(message)
@@ -565,10 +792,21 @@ def edit_message(conversation_id: int, message_id: int, payload: EditMessageRequ
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    answer = _answer_chat_message(message)
+    try:
+        assistant_message = _build_deterministic_chat_message(conversation_id, message)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to generate deterministic chat response")
+        raise HTTPException(status_code=500, detail="Failed to generate chat response") from exc
+
+    if assistant_message is None:
+        answer = _answer_chat_message(message)
+        assistant_message = {"role": "assistant", "type": "text", "text": answer}
+
     store.append_messages(
         conversation_id,
-        [{"role": "assistant", "type": "text", "text": answer}],
+        [assistant_message],
     )
 
     return {"messages": store.list_messages(conversation_id)}

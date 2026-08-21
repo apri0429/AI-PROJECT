@@ -65,13 +65,49 @@ def _pick_title_field(headers: list[str]) -> str | None:
     return headers[0]
 
 
+_IGNORED_DATA_FIELDS = {"no"}  # a running row number, present even on fully blank spacer rows
+
+
+def _row_has_data(row: dict[str, Any], primary_field: str | None) -> bool:
+    """True if any field besides the title (and the row-number column) has a
+    real value. Distinguishes a genuine continuation row of a
+    vertically-merged title (has other data, just no title) from a fully
+    blank spacer/leftover row far below a sheet's real data (nothing but an
+    auto-numbered "No" column) — the latter should never be kept, forward-
+    filled or not."""
+    for key, value in row.items():
+        if key == primary_field or key.strip().lower() in _IGNORED_DATA_FIELDS:
+            continue
+        text = str(value).strip()
+        if text and text.upper() != "FALSE":
+            return True
+    return False
+
+
 def _normalize_sheet_rows(rows: list[dict[str, Any]], headers: list[str]) -> list[dict[str, Any]]:
+    """A blank title cell on an otherwise-populated row almost always means
+    this row sits under a title cell vertically merged in the source Google
+    Sheet (e.g. several variant rows sharing one product name) — the CSV/API
+    export only reports the value on the merge's first row, leaving every
+    row below it blank. Carry the last real title forward onto those rows
+    instead of dropping them as unlabeled "(untitled row)" noise. But a row
+    with no title AND no other data at all is a genuine blank/spacer row
+    (e.g. unused rows left over below a sheet's real data) — those are
+    dropped entirely rather than forward-filled, otherwise they'd all get
+    mislabeled as trailing "variants" of whatever product happened to be
+    last."""
     primary_field = _pick_title_field(headers)
     normalized: list[dict[str, Any]] = []
+    last_title = ""
     for row in rows:
         title = str(row.get(primary_field, "")).strip() if primary_field else ""
+        has_data = _row_has_data(row, primary_field)
+        if not title and not has_data:
+            continue
+        if title:
+            last_title = title
         rest = {k: v for k, v in row.items() if k != primary_field}
-        normalized.append({"product_name": title or "(untitled row)", **rest})
+        normalized.append({"product_name": last_title or "(untitled row)", **rest})
     return normalized
 
 

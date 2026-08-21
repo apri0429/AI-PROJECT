@@ -266,6 +266,13 @@
   color: rgba(255, 255, 255, 0.72);
 }
 
+.nav-submenu--chat-list .nav-item--child {
+  min-height: 44px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 14px;
+}
+
 #sidebar.sidebar.collapsed .nav-item--child {
   display: none;
 }
@@ -598,7 +605,7 @@
 }
 
 .nav-submenu--chat-list.expanded {
-  max-height: 232px;
+  max-height: 252px;
   overflow: hidden;
 }
 
@@ -606,14 +613,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 216px;
+  max-height: 236px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 4px;
+  padding-right: 8px;
 }
 
 .nav-submenu-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .nav-submenu-scroll::-webkit-scrollbar-track {

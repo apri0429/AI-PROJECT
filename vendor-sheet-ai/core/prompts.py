@@ -10,10 +10,44 @@ _STOPWORDS = {
     "details", "lengkap", "full", "semua",
 }
 
+_PRODUCT_NAME_TERMS = {
+    "product", "produk", "barang", "item", "nama", "name", "names", "list",
+    "daftar", "tampilkan", "munculin", "munculkan", "show", "all",
+}
+
 
 def _tokenize(text: str) -> set[str]:
     words = re.findall(r"[a-zA-Z0-9]+", text.lower())
     return {w for w in words if len(w) >= 3 and w not in _STOPWORDS}
+
+
+def wants_all_product_names(question: str) -> bool:
+    """Detect requests that should show every product name directly from DB.
+
+    Sending thousands of product names through the LLM is both expensive and
+    easy to truncate, so the chat endpoint handles this intent deterministically.
+    """
+    tokens = set(re.findall(r"[a-zA-Z0-9]+", question.lower()))
+    asks_for_names = bool(tokens & {"nama", "name", "names", "list", "daftar"})
+    mentions_products = bool(tokens & {"product", "produk", "barang", "item"})
+    asks_for_all = bool(tokens & {"semua", "all", "lengkap", "full"})
+    listy_phrase = any(
+        phrase in question.lower()
+        for phrase in (
+            "nama produk", "nama product", "daftar produk", "daftar product",
+            "list produk", "list product", "product names", "produk apa saja",
+            "produk apa aja", "naam produk", "naam product", "semua produk",
+            "semua product", "all products", "all product",
+        )
+    )
+    detail_intent = bool(tokens & {"detail", "details", "spesifikasi", "spec", "specs"})
+    count_intent = bool(tokens & {"berapa", "jumlah", "total", "banyak", "count"})
+    return (
+        listy_phrase
+        and (asks_for_all or asks_for_names or mentions_products)
+        and not detail_intent
+        and not count_intent
+    )
 
 
 def select_relevant_rows(
@@ -25,14 +59,18 @@ def select_relevant_rows(
     if len(rows) <= max_rows:
         return rows, True
 
-    tokens = _tokenize(question)
+    tokens = _tokenize(question) - _PRODUCT_NAME_TERMS
     if not tokens:
         return rows[:max_rows], False
 
     scored = []
     for row in rows:
+        product_text = str(row.get("product_name") or "").lower()
+        vendor_text = str(row.get("vendor_name") or "").lower()
         haystack = " ".join(str(v).lower() for v in row.values())
-        score = sum(1 for t in tokens if t in haystack)
+        score = sum(3 for t in tokens if t in product_text)
+        score += sum(2 for t in tokens if t in vendor_text)
+        score += sum(1 for t in tokens if t in haystack)
         if score > 0:
             scored.append((score, row))
 
@@ -129,10 +167,13 @@ CHAT_SYSTEM_INSTRUCTION += (
 )
 
 
-def build_chat_prompt(question: str, rows: list[dict[str, object]]) -> str:
+def build_chat_prompt(
+    question: str, rows: list[dict[str, object]], total_row_count: int | None = None
+) -> str:
     if not rows:
         rows_context = "(no rows stored yet)"
     else:
+        total_rows = total_row_count if total_row_count is not None else len(rows)
         selected, is_full_detail = select_relevant_rows(question, rows)
 
         if is_full_detail:
@@ -141,10 +182,17 @@ def build_chat_prompt(question: str, rows: list[dict[str, object]]) -> str:
                 visible = {k: v for k, v in row.items() if k not in ("source", "row_index")}
                 blocks.append(f"Row {i}:\n{_format_row_context(visible)}")
             rows_context = "\n\n".join(blocks)
+            if total_rows > len(selected):
+                rows_context = (
+                    f"(Showing {len(selected)} relevant row(s) out of {total_rows} total "
+                    "database row(s). Do not say the whole database only has this many rows; "
+                    "for exact counts or full product-name lists, use the database lookup.)\n\n"
+                    f"{rows_context}"
+                )
         else:
             names = [str(row.get("product_name", "(untitled)")) for row in selected]
             rows_context = (
-                f"(The database has {len(rows)} rows — too many to list in full, and "
+                f"(The database has {total_rows} rows — too many to list in full, and "
                 "none matched keywords from the question, so only product names are "
                 f"shown below. Ask the user to name a specific product.)\n"
                 + "\n".join(f"- {name}" for name in names)
